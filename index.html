@@ -24,7 +24,7 @@
     *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; }
     button { font: inherit; cursor: pointer; }
-    button:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
     button:disabled { cursor: default; opacity: .56; }
     [hidden] { display: none !important; }
     .shell { min-height: 100svh; display: grid; grid-template-rows: auto 1fr auto; }
@@ -40,6 +40,7 @@
     .stage { min-height: 650px; position: relative; display: grid; grid-template-columns: 1fr 1fr; align-items: center; isolation: isolate; overflow: hidden; }
     .viewport { position: absolute; inset: 0; touch-action: pan-y; background: radial-gradient(ellipse at 64% 43%, #221333, #0b0813 74%); }
     .viewport canvas { display: block; width: 100%; height: 100%; }
+    .viewport .hand-skeleton { position: absolute; inset: 0; pointer-events: none; }
     .vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 59% 48%, #7b21ab15, transparent 55%), linear-gradient(90deg, #0b0813c9, #0b08132c 27%, transparent 43%, transparent 87%, #0b081351), radial-gradient(ellipse at 59% 48%, transparent 30%, #0b08134d 74%, #0b0813aa); }
     .intro { position: relative; z-index: 1; justify-self: start; margin-inline-start: var(--gutter); pointer-events: none; }
     .intro h1 { margin: 0; color: #f1e6ef; font: 500 clamp(4rem, 7.2vw, 8rem)/.94 "Songti SC", SimSun, "Noto Serif SC", serif; letter-spacing: .01em; text-shadow: 0 12px 46px #060309b0; }
@@ -47,6 +48,24 @@
     .intro h1 span:last-child { color: #c8a1ee; }
     .intro p { margin: 24px 0 0; color: #d3bfdc; }
     .intro-divider { display: block; height: 1px; width: 56px; margin-top: 25px; background: linear-gradient(90deg, #e9c989, #bd88db37); }
+    .color-control { width: min(238px, 32vw); margin-top: 26px; text-align: left; pointer-events: auto; }
+    .color-control label { color: #e9d8f2; font-size: .875rem; font-weight: 600; }
+    .color-range {
+      appearance: none; display: block; width: 100%; height: 24px; margin: 4px 0 0;
+      background: transparent; cursor: ew-resize; border-radius: 6px;
+      --hue-track: linear-gradient(90deg, #583097, #a275ef 49%, #9be4ff);
+    }
+    .color-range::-webkit-slider-runnable-track { height: 6px; border-radius: 6px; background: var(--hue-track); }
+    .color-range::-moz-range-track { height: 6px; border-radius: 6px; background: var(--hue-track); }
+    .color-range::-webkit-slider-thumb {
+      appearance: none; width: 16px; height: 16px; margin-top: -5px; border: 2px solid #eedafa; border-radius: 50%;
+      background: #1f132d; box-shadow: 0 0 8px #c295f183;
+    }
+    .color-range::-moz-range-thumb {
+      width: 13px; height: 13px; border: 2px solid #eedafa; border-radius: 50%;
+      background: #1f132d; box-shadow: 0 0 8px #c295f183;
+    }
+    .color-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: .8125rem; }
     .guide { position: relative; align-self: end; justify-self: end; z-index: 1; width: min(222px, 20vw); margin: 0 var(--gutter) 34px 0; padding: 15px 16px 12px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(145deg,#221930f5,#100c1bea); backdrop-filter: blur(12px); }
     .guide h2 { margin: 0 0 5px; font-size: .875rem; font-weight: 650; letter-spacing: .15em; color: var(--gold); }
     .guide dl { margin: 0; font-size: .875rem; }
@@ -62,9 +81,13 @@
     .camera-preview video { display: block; width: 100%; max-height: 125px; object-fit: contain; transform: scaleX(-1); }
     .failure { position: absolute; z-index: 2; left: 50%; bottom: 27px; transform: translateX(-50%); width: min(555px, 90%); margin: 0; text-align: center; color: #f5cfbc; }
     .footer { min-height: 75px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 15px; border-top: 1px solid var(--line); }
-    .state, .pointer-hint { margin: 0; color: var(--muted); font-size: .875rem; }
-    .state { display: flex; align-items: center; gap: 9px; }
-    .state::before { content: ''; width: 7px; height: 7px; background: var(--gold); border-radius: 50%; box-shadow: 0 0 11px #fa70dd75; }
+    .pointer-hint { margin: 0; color: var(--muted); font-size: .875rem; }
+    .morph-readout { width: min(210px, 100%); }
+    .meter-label { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; color: var(--muted); font-size: .8125rem; white-space: nowrap; }
+    .meter-value { display: flex; align-items: baseline; gap: 8px; color: #e8d6f4; font-size: .875rem; }
+    #opening-percent { min-width: 4ch; text-align: right; font-weight: 650; color: var(--gold); font-variant-numeric: tabular-nums; }
+    .meter-track { height: 4px; margin-top: 7px; background: #3a2b4b; border-radius: 4px; overflow: hidden; }
+    .meter-fill { display: block; width: 100%; height: 100%; background: linear-gradient(90deg, #9468d8, #d0a6f1 58%, #edcfa0); transform: scaleX(0); transform-origin: left center; }
     .pointer-hint { text-align: right; }
     .modes { padding: 4px; display: flex; gap: 4px; border: 1px solid #baa1cf48; border-radius: 8px; background: #0c0814; }
     .mode { min-height: 38px; padding: 0 22px; border: 1px solid transparent; border-radius: 5px; font-size: .875rem; color: #c5b3d0; background: transparent; }
@@ -84,8 +107,9 @@
       .intro h1 span { display: inline; }
       .intro-divider { display: none; }
       .intro p { margin-top: 10px; font-size: .875rem; }
-      .viewport { inset: 117px 0 123px; }
-      .vignette { top: 115px; bottom: 120px; background: radial-gradient(ellipse at center, #7b21ab15, transparent 54%), radial-gradient(ellipse at center, transparent 38%, #0b081351 79%, #0b0813a8), linear-gradient(0deg,#0c0813,transparent 11%,transparent 88%,#0c0813); }
+      .color-control { width: min(245px, 75vw); margin: 12px auto 0; }
+      .viewport { inset: 181px 0 123px; }
+      .vignette { top: 178px; bottom: 120px; background: radial-gradient(ellipse at center, #7b21ab15, transparent 54%), radial-gradient(ellipse at center, transparent 38%, #0b081351 79%, #0b0813a8), linear-gradient(0deg,#0c0813,transparent 11%,transparent 88%,#0c0813); }
       .guide { width: 100%; margin: 0; padding: 9px 12px; }
       .guide h2 { margin-bottom: 1px; }
       .guide dl { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
@@ -97,6 +121,10 @@
       .pointer-hint { display: none; }
       .mode { padding-inline: 17px; }
       .failure { bottom: 133px; }
+    }
+    @media (max-width: 365px) {
+      .meter-caption { display: none; }
+      .meter-value { width: 100%; justify-content: space-between; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { transition-duration: .01ms !important; }
@@ -110,12 +138,17 @@
       <button class="camera-button" id="camera-button" type="button" aria-pressed="false"><span class="camera-icon" aria-hidden="true"></span><span id="camera-label">开启手势</span></button>
     </header>
     <main class="stage">
-      <div class="viewport" id="viewport" role="img" aria-label="紫金色三维粒子聚合成一朵花"></div>
+      <div class="viewport" id="viewport" role="img" aria-label="彩色三维粒子聚合成一朵花"></div>
       <div class="vignette" aria-hidden="true"></div>
       <section class="intro" aria-labelledby="title">
         <h1 id="title"><span>掌心</span><span>花开</span></h1>
         <span class="intro-divider" aria-hidden="true"></span>
-        <p>用手势聚拢、散开紫金粒子。</p>
+        <p>用手势聚拢、散开粒子。</p>
+        <div class="color-control">
+          <label for="flower-color">花色</label>
+          <input class="color-range" id="flower-color" type="range" min="0" max="100" value="0" aria-valuetext="深紫色">
+          <div class="color-ends" aria-hidden="true"><span>深紫</span><span>浅蓝</span></div>
+        </div>
       </section>
       <aside class="guide" aria-labelledby="guide-title">
         <h2 id="guide-title">手势指南</h2>
@@ -132,7 +165,10 @@
       <noscript><p class="failure">请启用 JavaScript 以显示粒子花。</p></noscript>
     </main>
     <footer class="footer">
-      <p class="state" id="flower-state" aria-live="polite">已聚合</p>
+      <div class="morph-readout">
+        <div class="meter-label"><span class="meter-caption">张开幅度</span><span class="meter-value"><span id="opening-stage">花苞</span><strong id="opening-percent">0%</strong></span></div>
+        <div class="meter-track" id="opening-meter" role="meter" aria-label="张开幅度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="花苞，0%"><span class="meter-fill" aria-hidden="true"></span></div>
+      </div>
       <div class="modes" role="group" aria-label="花朵状态">
         <button type="button" class="mode" id="gather" aria-pressed="true">聚合</button>
         <button type="button" class="mode" id="scatter" aria-pressed="false">散开</button>
@@ -181,6 +217,11 @@
       renderer.toneMappingExposure = 1.16;
       renderer.domElement.setAttribute('aria-hidden', 'true');
       viewport.append(renderer.domElement);
+      const handCanvas = document.createElement('canvas');
+      handCanvas.className = 'hand-skeleton';
+      handCanvas.setAttribute('aria-hidden', 'true');
+      viewport.append(handCanvas);
+      const handInk = handCanvas.getContext('2d');
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x0d0717);
       const camera = new THREE.PerspectiveCamera(39, 1, .1, 75);
@@ -191,17 +232,30 @@
 
       const fingertips = Array.from({ length: 5 }, () => new THREE.Vector2());
       const strengths = new Float32Array(5);
+      const colorRange = $('#flower-color');
+      let shade = Number(colorRange.value) / 100;
+      colorRange.addEventListener('input', () => {
+        shade = Number(colorRange.value) / 100;
+        const description = shade < .22 ? '深紫色' : shade < .59 ? '蓝紫色' : shade < .82 ? '天蓝色' : '浅蓝色';
+        colorRange.setAttribute('aria-valuetext', description);
+      });
       const uniforms = {
         uSpread: { value: 0 }, uTime: { value: 0 }, uPointScale: { value: 1 },
-        uAspect: { value: 1 }, uImpulse: { value: 0 },
+        uAspect: { value: 1 }, uImpulse: { value: 0 }, uShade: { value: shade },
         uFingers: { value: fingertips }, uStrengths: { value: strengths },
       };
-      const data = { home: [], cloud: [], tint: [], motion: [], style: [] };
+      const data = { home: [], cloud: [], tint: [], coolTint: [], motion: [], style: [] };
       const darkViolet = palette([0x7441ba, 0x7947d2, 0x7651ed, 0x8d4dde, 0xa765ee]);
       const violet = palette([0x9c52f6, 0xb46eff, 0xc17afb, 0xd291ff, 0x8a67f6]);
       const lilac = palette([0xdd99ff, 0xf0b8ff, 0xbdaaff, 0xc77bff, 0xe6c0ff]);
       const gold = palette([0xce782d, 0xea9737, 0xffb54d, 0xffcb68, 0xffdfa0]);
       const ivory = new THREE.Color(0xffe5b2);
+      const coolPalette = new Map([...darkViolet, ...violet, ...lilac].map((color) => {
+        const { h, s, l } = color.getHSL({}, THREE.SRGBColorSpace);
+        const hue = clamp(.551 + (h - .74) * .31, .51, .59);
+        const lightness = clamp(.60 + (l - .53) * .67, .48, .86);
+        return [color, new THREE.Color().setHSL(hue, .70 + s * .23, lightness, THREE.SRGBColorSpace)];
+      }));
 
       function addParticle(home, color, size, sparkle = 0) {
         const azimuth = range(0, tau);
@@ -211,11 +265,13 @@
         data.home.push(home.x, home.y, home.z);
         data.cloud.push(Math.cos(azimuth) * side * 7.15, Math.sin(azimuth) * side * 4.63, z * r * 6.05);
         data.tint.push(color.r, color.g, color.b);
+        const cool = coolPalette.get(color) ?? color;
+        data.coolTint.push(cool.r, cool.g, cool.b);
         data.motion.push(range(0, tau), range(.48, 1.52), range(.14, .63), range(0, .083));
         data.style.push(size, sparkle, range(.59, 1.0));
       }
 
-      // The flower and the drifting cloud use the same points and keep their color throughout the morph.
+      // The flower and the drifting cloud share the same particle geometry.
       const headTilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(-.36, -.19, -.13));
       const layers = [
         { count: 12, root: .48, radius: 3.62, width: .88, depth: -.64, curl: .50, offset: .06, body: 404, tint: darkViolet },
@@ -292,16 +348,17 @@
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(data.home, 3));
       geometry.setAttribute('aCloud', new THREE.Float32BufferAttribute(data.cloud, 3));
       geometry.setAttribute('aTint', new THREE.Float32BufferAttribute(data.tint, 3));
+      geometry.setAttribute('aCoolTint', new THREE.Float32BufferAttribute(data.coolTint, 3));
       geometry.setAttribute('aMotion', new THREE.Float32BufferAttribute(data.motion, 4));
       geometry.setAttribute('aStyle', new THREE.Float32BufferAttribute(data.style, 3));
       const material = new THREE.ShaderMaterial({
         uniforms,
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
         vertexShader: `
-          uniform float uSpread, uTime, uPointScale, uAspect, uImpulse;
+          uniform float uSpread, uTime, uPointScale, uAspect, uImpulse, uShade;
           uniform vec2 uFingers[5];
           uniform float uStrengths[5];
-          attribute vec3 aCloud, aTint, aStyle;
+          attribute vec3 aCloud, aTint, aCoolTint, aStyle;
           attribute vec4 aMotion;
           varying vec3 vTint;
           varying vec2 vAxis;
@@ -337,7 +394,7 @@
             float twinkle = pow(.5 + .5 * sin(phase * (1.7 + aStyle.z)), 3.);
             vLight = (.67 + .33 * twinkle) * aStyle.z;
             vSpark = aStyle.y * (.50 + .50 * twinkle);
-            vTint = aTint;
+            vTint = mix(aTint, aCoolTint, uShade);
             float size = aStyle.x * uPointScale / max(3.5, -view.z);
             gl_PointSize = clamp(size * (1. + vTouch * .41 + spread * .27 + vTrail * 1.24), 1.0, 30.0);
           }
@@ -374,17 +431,32 @@
       let height = 1;
       const gatherButton = $('#gather');
       const scatterButton = $('#scatter');
-      const flowerState = $('#flower-state');
+      const openingMeter = $('#opening-meter');
+      const openingFill = $('.meter-fill');
+      const openingStage = $('#opening-stage');
+      const openingPercent = $('#opening-percent');
+      let lastPercent = 0;
       function setScattered(next) {
         if (next === scattered) return;
         scattered = next;
         scatterButton.setAttribute('aria-pressed', String(next));
         gatherButton.setAttribute('aria-pressed', String(!next));
-        flowerState.textContent = next ? '已散开' : '已聚合';
-        viewport.setAttribute('aria-label', next ? '紫金色粒子在三维空间中漂浮' : '紫金色三维粒子聚合成一朵花');
+        viewport.setAttribute('aria-label', next ? '彩色粒子在三维空间中漂浮' : '彩色三维粒子聚合成一朵花');
       }
       scatterButton.addEventListener('click', () => setScattered(true));
       gatherButton.addEventListener('click', () => setScattered(false));
+
+      function updateOpeningMeter() {
+        const percent = spread === 0 || spread === 1 ? spread * 100 : clamp(Math.round(spread * 100), 1, 99);
+        if (percent === lastPercent) return;
+        lastPercent = percent;
+        const label = percent < 20 ? '花苞' : percent < 80 ? '舒展' : '绽放';
+        if (openingStage.textContent !== label) openingStage.textContent = label;
+        openingPercent.textContent = `${percent}%`;
+        openingMeter.setAttribute('aria-valuenow', String(percent));
+        openingMeter.setAttribute('aria-valuetext', `${label}，${percent}%`);
+        openingFill.style.transform = `scaleX(${percent / 100})`;
+      }
 
       const pointer = new THREE.Vector2();
       let pointerActive = false;
@@ -406,18 +478,71 @@
       let pitch = .01;
       const aim = vec(0, 0, 0);
       const tips = [8, 12, 16, 20, 4];
+      const joints = Array.from({ length: 21 }, () => new THREE.Vector2());
+      const bones = [
+        [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+        [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15], [15, 16],
+        [13, 17], [0, 17], [17, 18], [18, 19], [19, 20],
+      ];
+      let handOpacity = 0;
+      function drawHand(dt, motionAllowed) {
+        if (!landmarks && handOpacity === 0) return;
+        const blend = handOpacity < .03 || !motionAllowed ? 1 : 1 - Math.exp(-25 * dt);
+        if (landmarks) {
+          const videoAspect = video.videoWidth / video.videoHeight || width / height;
+          const areaWidth = Math.min(width, height * videoAspect);
+          const areaHeight = Math.min(height, width / videoAspect);
+          for (let i = 0; i < joints.length; i++) {
+            const point = landmarks[i];
+            const x = .5 + (.5 - point.x) * areaWidth / width;
+            const y = .5 + (point.y - .5) * areaHeight / height;
+            joints[i].x = lerp(joints[i].x, x, blend);
+            joints[i].y = lerp(joints[i].y, y, blend);
+          }
+        }
+        const target = Number(Boolean(landmarks));
+        handOpacity = motionAllowed ? damp(handOpacity, target, 27, dt) : target;
+        if (!landmarks && handOpacity < .015) handOpacity = 0;
+        if (!handInk) return;
+        handInk.clearRect(0, 0, width, height);
+        if (handOpacity === 0) return;
+        handInk.save();
+        handInk.globalAlpha = handOpacity * .84;
+        handInk.lineCap = 'round';
+        handInk.beginPath();
+        for (const [a, b] of bones) {
+          handInk.moveTo(joints[a].x * width, joints[a].y * height);
+          handInk.lineTo(joints[b].x * width, joints[b].y * height);
+        }
+        handInk.strokeStyle = '#261731';
+        handInk.lineWidth = 3.4;
+        handInk.stroke();
+        handInk.strokeStyle = '#d7bbff';
+        handInk.lineWidth = 1.45;
+        handInk.stroke();
+        for (let i = 0; i < joints.length; i++) {
+          const point = joints[i];
+          const isTip = tips.includes(i);
+          handInk.fillStyle = isTip ? '#ffe1a8' : '#f1dfff';
+          handInk.beginPath();
+          handInk.arc(point.x * width, point.y * height, isTip ? 3.2 : 2, 0, tau);
+          handInk.fill();
+        }
+        handInk.restore();
+      }
+
       function updateTouches(dt, motionAllowed) {
         for (let i = 0; i < tips.length; i++) {
-          const fingertip = landmarks?.[tips[i]];
-          const usePointer = !landmarks && pointerActive && i === 0;
           let strength = 0;
-          if (fingertip || usePointer) {
-            const x = fingertip ? 1 - fingertip.x : pointer.x;
-            const y = fingertip ? fingertip.y : pointer.y;
+          if (landmarks) {
+            const point = joints[tips[i]];
+            fingertips[i].set(point.x * 2 - 1, 1 - point.y * 2);
+            strength = i === 0 ? .78 : .27;
+          } else if (pointerActive && i === 0) {
             const blend = strengths[i] < .03 || !motionAllowed ? 1 : 1 - Math.exp(-25 * dt);
-            fingertips[i].x = lerp(fingertips[i].x, x * 2 - 1, blend);
-            fingertips[i].y = lerp(fingertips[i].y, 1 - y * 2, blend);
-            strength = usePointer ? .91 : i === 0 ? .78 : .27;
+            fingertips[i].x = lerp(fingertips[i].x, pointer.x * 2 - 1, blend);
+            fingertips[i].y = lerp(fingertips[i].y, 1 - pointer.y * 2, blend);
+            strength = .91;
           }
           strengths[i] = motionAllowed ? damp(strengths[i], strength, 20, dt) : strength * .50;
         }
@@ -429,6 +554,9 @@
         const pixelRatio = Math.min(devicePixelRatio, width > 1100 ? 1.45 : 1.65);
         renderer.setPixelRatio(pixelRatio);
         renderer.setSize(width, height, false);
+        handCanvas.width = renderer.domElement.width;
+        handCanvas.height = renderer.domElement.height;
+        handInk?.setTransform(handCanvas.width / width, 0, 0, handCanvas.height / height, 0, 0);
         composer.setPixelRatio(pixelRatio);
         composer.setSize(width, height);
         camera.setViewOffset(width, height, smallScreen.matches ? 0 : -width * .086, 0, width, height);
@@ -467,6 +595,7 @@
           spread = target;
           spreadVelocity = 0;
         }
+        updateOpeningMeter();
 
         const idleYaw = motionAllowed ? Math.sin(time * .39) * .17 : 0;
         const yawGoal = landmarks ? handYaw : pointerActive ? (pointer.x - .5) * .70 : idleYaw;
@@ -481,6 +610,9 @@
         uniforms.uSpread.value = spread;
         uniforms.uTime.value = time;
         uniforms.uImpulse.value = clamp(Math.abs(spreadVelocity) * .28, 0, .95);
+        const tint = motionAllowed ? damp(uniforms.uShade.value, shade, 23, dt) : shade;
+        uniforms.uShade.value = Math.abs(tint - shade) < .0005 ? shade : tint;
+        drawHand(dt, motionAllowed);
         updateTouches(dt, motionAllowed);
         composer.render(dt);
       }
