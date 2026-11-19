@@ -623,10 +623,18 @@
       const handsBase = new URL('./vendor/hands/', import.meta.url).href;
       const modelMirror = 'https://cdn.jsdelivr.net/gh/GoJa886/palm-bloom-flower@9b61d46c3e5521f1da0e6c683286378b0c41042b/vendor/hands/';
       const packedAsset = { stem: 'hands_solution_packed_assets_lite', bytes: 1985451 };
-      const modelFiles = [
-        { key: 'hands_solution_packed_assets.data', name: `${packedAsset.stem}.data`, bytes: packedAsset.bytes },
-        { key: 'hand_landmark_lite.tflite', name: 'hand_landmark_lite.tflite', bytes: 2071408 },
-      ];
+      const modelCacheName = 'palm-bloom-hands-assets-0.4.1675469240';
+      // Use the same SIMD feature check as the pinned MediaPipe runtime.
+      const simdProbe = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 3, 2, 1, 0, 10, 9, 1, 7, 0, 65, 0, 253, 15, 26, 11]);
+      function gestureModelFiles() {
+        const simd = WebAssembly.validate(simdProbe);
+        const wasm = simd ? 'hands_solution_simd_wasm_bin.wasm' : 'hands_solution_wasm_bin.wasm';
+        return [
+          { key: 'hands_solution_packed_assets.data', name: `${packedAsset.stem}.data`, bytes: packedAsset.bytes },
+          { key: 'hand_landmark_lite.tflite', name: 'hand_landmark_lite.tflite', bytes: 2071408 },
+          { key: wasm, name: wasm, bytes: simd ? 6026259 : 5917209, type: 'application/wasm' },
+        ];
+      }
       let cameraSession = null;
       let cameraCleanup = Promise.resolve();
 
@@ -658,28 +666,35 @@
         });
       }
 
-      async function downloadModelFile(file, signal, reportProgress) {
-        for (const [attempt, base] of [handsBase, modelMirror].entries()) {
-          if (signal.aborted) throw signal.reason;
-          const request = new AbortController();
-          const cancel = () => request.abort(signal.reason);
-          signal.addEventListener('abort', cancel, { once: true });
-          let idle;
-          function expectData() {
-            clearTimeout(idle);
-            idle = setTimeout(() => request.abort(new DOMException('Model download made no progress', 'TimeoutError')), 12000);
-          }
+      function openModelCache() {
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => resolve(null), 300);
+          Promise.resolve().then(() => window.caches?.open(modelCacheName)).then(resolve, () => resolve(null))
+            .finally(() => clearTimeout(timer));
+        });
+      }
 
-          try {
-            reportProgress(file.key, 0, attempt);
-            expectData();
-            const response = await fetch(`${base}${file.name}`, { signal: request.signal, cache: attempt ? 'reload' : 'default' });
-            if (!response.ok) throw new Error(`HTTP ${response.status} for ${file.name}`);
-            let blob;
-            if (response.body?.getReader) {
-              const reader = response.body.getReader();
-              const chunks = [];
-              let loaded = 0;
+      async function streamModel(file, base, signal, reportBytes, cache) {
+        if (signal.aborted) throw signal.reason;
+        const request = new AbortController();
+        const cancel = () => request.abort(signal.reason);
+        signal.addEventListener('abort', cancel, { once: true });
+        let idle;
+        function expectData() {
+          clearTimeout(idle);
+          idle = setTimeout(() => request.abort(new DOMException('Model download made no progress', 'TimeoutError')), 12000);
+        }
+        try {
+          expectData();
+          const response = await fetch(`${base}${file.name}`, { signal: request.signal, cache });
+          if (!response.ok) throw new Error(`HTTP ${response.status} for ${file.name}`);
+          const type = file.type || 'application/octet-stream';
+          let blob;
+          if (response.body?.getReader) {
+            const reader = response.body.getReader();
+            const chunks = [];
+            let loaded = 0;
+            try {
               while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
@@ -687,27 +702,79 @@
                 chunks.push(value);
                 loaded += value.byteLength;
                 if (loaded > file.bytes) throw new Error(`Unexpected model size for ${file.name}`);
-                reportProgress(file.key, loaded, attempt);
+                reportBytes(loaded);
               }
-              blob = new Blob(chunks, { type: 'application/octet-stream' });
-            } else {
-              clearTimeout(idle);
-              blob = await response.blob();
+            } finally {
+              reader.releaseLock();
             }
-            if (blob.size !== file.bytes) throw new Error(`Incomplete model file: ${file.name}`);
-            reportProgress(file.key, file.bytes, attempt);
-            return blob;
-          } catch (error) {
-            if (signal.aborted) throw signal.reason || error;
-            if (attempt) {
-              const failure = request.signal.reason || error;
-              throw new DOMException(failure.message, failure.name === 'TimeoutError' ? 'ModelDownloadTimeout' : 'ModelDownloadError');
-            }
-          } finally {
+            blob = new Blob(chunks, { type });
+          } else {
             clearTimeout(idle);
-            signal.removeEventListener('abort', cancel);
-            request.abort();
+            blob = new Blob([await response.arrayBuffer()], { type });
           }
+          if (blob.size !== file.bytes) throw new Error(`Incomplete model file: ${file.name}`);
+          reportBytes(blob.size);
+          return blob;
+        } catch (error) {
+          throw request.signal.reason || error;
+        } finally {
+          clearTimeout(idle);
+          signal.removeEventListener('abort', cancel);
+          request.abort();
+        }
+      }
+
+      async function downloadModelFile(file, signal, reportProgress, cacheReady) {
+        const cache = await cacheReady;
+        const cacheKey = `${handsBase}${file.name}`;
+        try {
+          const cached = await cache?.match(cacheKey);
+          const blob = cached ? await cached.blob() : null;
+          if (blob?.size === file.bytes) {
+            reportProgress(file.key, file.bytes, false);
+            return blob;
+          }
+        } catch {
+          // Private browser sessions may restrict storage.
+        }
+        if (signal.aborted) throw signal.reason;
+
+        const transfer = new AbortController();
+        const cancel = () => transfer.abort(signal.reason);
+        const progress = [0, 0];
+        let usingMirror = false;
+        function report(source, size) {
+          progress[source] = size;
+          reportProgress(file.key, Math.max(...progress), usingMirror);
+        }
+        signal.addEventListener('abort', cancel, { once: true });
+        let startMirror;
+        const mirrorReady = new Promise((resolve) => { startMirror = resolve; });
+        const primary = streamModel(file, handsBase, transfer.signal, (size) => report(0, size), 'default');
+        primary.catch(startMirror);
+        // Give the default route a head start and hedge only when delivery is slow.
+        const slow = modelMirror === handsBase ? null : setTimeout(() => {
+          if (progress[0] < file.bytes * .35) startMirror();
+        }, 2200);
+        const backup = mirrorReady.then(() => {
+          if (transfer.signal.aborted) throw transfer.signal.reason;
+          usingMirror = true;
+          report(1, 0);
+          return streamModel(file, modelMirror, transfer.signal, (size) => report(1, size), modelMirror === handsBase ? 'reload' : 'default');
+        });
+        try {
+          const blob = await Promise.any([primary, backup]);
+          if (cache) cache.put(cacheKey, new Response(blob, { headers: { 'content-type': blob.type } })).catch(() => {});
+          return blob;
+        } catch (error) {
+          if (signal.aborted) throw signal.reason || error;
+          const failure = error.errors?.at(-1) || error;
+          throw new DOMException(failure.message, failure.name === 'TimeoutError' ? 'ModelDownloadTimeout' : 'ModelDownloadError');
+        } finally {
+          clearTimeout(slow);
+          signal.removeEventListener('abort', cancel);
+          transfer.abort();
+          startMirror();
         }
       }
 
@@ -719,15 +786,21 @@
         });
         let deadline;
         let slowHint;
+        function modelStatus(message) {
+          session.modelMessage = message;
+          if (cameraSession === session && session.cameraReady) status(message);
+        }
         function showPhase(message, slowMessage, duration, failureName) {
           clearTimeout(deadline);
           clearTimeout(slowHint);
-          status(message);
-          if (slowMessage) slowHint = setTimeout(() => { if (cameraSession === session) status(slowMessage); }, 8000);
+          modelStatus(message);
+          if (slowMessage) slowHint = setTimeout(() => modelStatus(slowMessage), 8000);
           deadline = setTimeout(() => controller.abort(new DOMException(slowMessage || message, failureName)), duration);
         }
 
         try {
+          const modelFiles = gestureModelFiles();
+          const cache = openModelCache();
           const transfers = new Map();
           const totalBytes = modelFiles.reduce((total, file) => total + file.bytes, 0);
           function reportProgress(key, loaded, attempt) {
@@ -740,10 +813,10 @@
               retrying ||= Boolean(transfer.attempt);
             }
             const percent = Math.min(99, Math.floor(downloaded / totalBytes * 100));
-            status(`${retrying ? '正在重试下载' : '正在下载手势模型'} · ${percent}%`);
+            modelStatus(`${retrying ? '正在重试下载' : '正在下载手势模型'} · ${percent}%`);
           }
           showPhase('正在下载手势模型 · 0%', '', 45000, 'ModelDownloadTimeout');
-          const downloads = Promise.all([loadHands(signal), ...modelFiles.map((file) => downloadModelFile(file, signal, reportProgress))]);
+          const downloads = Promise.all([loadHands(signal), ...modelFiles.map((file) => downloadModelFile(file, signal, reportProgress, cache))]);
           const [Hands, ...files] = await Promise.race([downloads, cancelled]);
           session.modelAssets = new Map(modelFiles.map((file, i) => [file.key, URL.createObjectURL(files[i])]));
           showPhase('正在初始化手势模型…', '正在初始化手势模型，设备较慢时请稍候…', 25000, 'ModelInitTimeout');
@@ -792,7 +865,7 @@
         status(message, tone);
       }
 
-      async function startCamera(session) {
+      async function openCamera(session) {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 30 } },
@@ -806,7 +879,12 @@
         await video.play();
         if (cameraSession !== session) return;
         $('#camera-preview').hidden = false;
-        const hands = await initializeHands(session);
+        session.cameraReady = true;
+        if (session.modelMessage) status(session.modelMessage);
+      }
+
+      async function startCamera(session) {
+        const [, hands] = await Promise.all([openCamera(session), initializeHands(session)]);
         if (cameraSession !== session) return;
         status('请将一只手放入画面', 'active');
         const videoFrames = typeof video.requestVideoFrameCallback === 'function';
