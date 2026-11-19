@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0916">
+  <title>掌心花开</title>
+  <script type="importmap">
+    {"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      font: 16px/1.5 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      --background: #0c0813;
+      --ink: #f3e8f5;
+      --muted: #b7a9c4;
+      --gold: #edcfa0;
+      --line: #b4a0cb38;
+      --gutter: clamp(22px, 4.65vw, 88px);
+      background: var(--background);
+      color: var(--ink);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; }
+    button { font: inherit; cursor: pointer; }
+    button:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+    button:disabled { cursor: default; opacity: .56; }
+    [hidden] { display: none !important; }
+    .shell { min-height: 100svh; display: grid; grid-template-rows: auto 1fr auto; }
+    .topbar, .footer { position: relative; z-index: 2; padding-inline: var(--gutter); background: #100b1a; }
+    .topbar { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 12px; font-size: .875rem; letter-spacing: .12em; }
+    .emblem { width: 38px; height: 38px; display: grid; place-items: center; color: var(--gold); border: 1px solid #d4ae7b70; border-radius: 50%; font: 23px/1 Georgia, serif; box-shadow: inset 0 0 14px #d5a57524; }
+    .camera-button { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid #ede0ff60; border-radius: 7px; background: #37264d; color: #f2e5fd; font-size: .875rem; transition: background .2s, border-color .2s; }
+    .camera-button:hover { background: #493260; border-color: #ddc4f5c4; }
+    .camera-button[aria-pressed="true"] { border-color: #d8bb825e; background: #373043; color: var(--gold); }
+    .camera-icon { position: relative; width: 15px; height: 11px; border: 1px solid currentColor; border-radius: 2px; margin-right: 3px; }
+    .camera-icon::after { content: ''; position: absolute; left: 100%; top: 1px; width: 5px; height: 7px; border: 1px solid currentColor; border-radius: 1px; transform: skewY(-23deg); }
+    .stage { min-height: 650px; position: relative; display: grid; grid-template-columns: 1fr 1fr; align-items: center; isolation: isolate; overflow: hidden; }
+    .viewport { position: absolute; inset: 0; touch-action: pan-y; background: radial-gradient(ellipse at 64% 43%, #221333, #0b0813 74%); }
+    .viewport canvas { display: block; width: 100%; height: 100%; }
+    .vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 59% 48%, #7b21ab15, transparent 55%), linear-gradient(90deg, #0b0813c9, #0b08132c 27%, transparent 43%, transparent 87%, #0b081351), radial-gradient(ellipse at 59% 48%, transparent 30%, #0b08134d 74%, #0b0813aa); }
+    .intro { position: relative; z-index: 1; justify-self: start; margin-inline-start: var(--gutter); pointer-events: none; }
+    .intro h1 { margin: 0; color: #f1e6ef; font: 500 clamp(4rem, 7.2vw, 8rem)/.94 "Songti SC", SimSun, "Noto Serif SC", serif; letter-spacing: .01em; text-shadow: 0 12px 46px #060309b0; }
+    .intro h1 span { display: block; }
+    .intro h1 span:last-child { color: #c8a1ee; }
+    .intro p { margin: 24px 0 0; color: #d3bfdc; }
+    .intro-divider { display: block; height: 1px; width: 56px; margin-top: 25px; background: linear-gradient(90deg, #e9c989, #bd88db37); }
+    .guide { position: relative; align-self: end; justify-self: end; z-index: 1; width: min(222px, 20vw); margin: 0 var(--gutter) 34px 0; padding: 15px 16px 12px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(145deg,#221930f5,#100c1bea); backdrop-filter: blur(12px); }
+    .guide h2 { margin: 0 0 5px; font-size: .875rem; font-weight: 650; letter-spacing: .15em; color: var(--gold); }
+    .guide dl { margin: 0; font-size: .875rem; }
+    .guide dl div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 7px 0; }
+    .guide dl div + div { border-top: 1px solid #bba1ce26; }
+    .guide dt { color: #ebe1ef; }
+    .guide dd { margin: 0; color: var(--muted); text-align: right; }
+    .status { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 0; color: #c4b1d2; font-size: .8125rem; }
+    .status::before { content: ''; flex: 0 0 6px; height: 6px; background: #a492a9; transform: translateY(-2px); border-radius: 50%; }
+    .status[data-tone="active"]::before { background: #d8b08a; box-shadow: 0 0 9px #d8b08aab; }
+    .status[data-tone="error"]::before { background: #ff9eae; }
+    .camera-preview { position: relative; margin-top: 10px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; background: #08060e; }
+    .camera-preview video { display: block; width: 100%; max-height: 125px; object-fit: contain; transform: scaleX(-1); }
+    .failure { position: absolute; z-index: 2; left: 50%; bottom: 27px; transform: translateX(-50%); width: min(555px, 90%); margin: 0; text-align: center; color: #f5cfbc; }
+    .footer { min-height: 75px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 15px; border-top: 1px solid var(--line); }
+    .state, .pointer-hint { margin: 0; color: var(--muted); font-size: .875rem; }
+    .state { display: flex; align-items: center; gap: 9px; }
+    .state::before { content: ''; width: 7px; height: 7px; background: var(--gold); border-radius: 50%; box-shadow: 0 0 11px #fa70dd75; }
+    .pointer-hint { text-align: right; }
+    .modes { padding: 4px; display: flex; gap: 4px; border: 1px solid #baa1cf48; border-radius: 8px; background: #0c0814; }
+    .mode { min-height: 38px; padding: 0 22px; border: 1px solid transparent; border-radius: 5px; font-size: .875rem; color: #c5b3d0; background: transparent; }
+    .mode:hover { color: var(--ink); background: #22172e; }
+    .mode[aria-pressed="true"] { color: #f6e2bc; border-color: #d4ab7c6c; background: #392b34; }
+    @media (max-width: 1000px) {
+      .guide { width: 178px; padding-inline: 12px; }
+      .pointer-hint { font-size: .8125rem; }
+    }
+    @media (max-width: 760px) {
+      .shell { grid-template-rows: auto minmax(648px, 1fr) auto; }
+      .topbar { min-height: 64px; }
+      .emblem { width: 33px; height: 33px; font-size: 20px; }
+      .stage { grid-template-columns: 1fr; align-content: space-between; padding: 24px var(--gutter) 14px; }
+      .intro { justify-self: center; text-align: center; margin: 0; }
+      .intro h1 { font-size: clamp(2.5rem, 9vw, 3.8rem); }
+      .intro h1 span { display: inline; }
+      .intro-divider { display: none; }
+      .intro p { margin-top: 10px; font-size: .875rem; }
+      .viewport { inset: 117px 0 123px; }
+      .vignette { top: 115px; bottom: 120px; background: radial-gradient(ellipse at center, #7b21ab15, transparent 54%), radial-gradient(ellipse at center, transparent 38%, #0b081351 79%, #0b0813a8), linear-gradient(0deg,#0c0813,transparent 11%,transparent 88%,#0c0813); }
+      .guide { width: 100%; margin: 0; padding: 9px 12px; }
+      .guide h2 { margin-bottom: 1px; }
+      .guide dl { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+      .guide dl div, .guide dl div + div { border: 0; padding: 3px 0; gap: 4px; flex-wrap: wrap; }
+      .guide dd { white-space: nowrap; }
+      .status { margin-top: 3px; }
+      .camera-preview { position: absolute; bottom: calc(100% + 8px); right: 0; width: 100px; }
+      .footer { min-height: 65px; grid-template-columns: 1fr auto; }
+      .pointer-hint { display: none; }
+      .mode { padding-inline: 17px; }
+      .failure { bottom: 133px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="emblem" aria-hidden="true">❋</span>手势花园</div>
+      <button class="camera-button" id="camera-button" type="button" aria-pressed="false"><span class="camera-icon" aria-hidden="true"></span><span id="camera-label">开启手势</span></button>
+    </header>
+    <main class="stage">
+      <div class="viewport" id="viewport" role="img" aria-label="紫金色三维粒子聚合成一朵花"></div>
+      <div class="vignette" aria-hidden="true"></div>
+      <section class="intro" aria-labelledby="title">
+        <h1 id="title"><span>掌心</span><span>花开</span></h1>
+        <span class="intro-divider" aria-hidden="true"></span>
+        <p>用手势聚拢、散开紫金粒子。</p>
+      </section>
+      <aside class="guide" aria-labelledby="guide-title">
+        <h2 id="guide-title">手势指南</h2>
+        <dl>
+          <div><dt>握拳</dt><dd>聚成花朵</dd></div>
+          <div><dt>张开手掌</dt><dd>散开粒子</dd></div>
+          <div><dt>移动手掌</dt><dd>转动视角</dd></div>
+          <div><dt>移动指尖</dt><dd>拨动粒子</dd></div>
+        </dl>
+        <p class="status" id="camera-status" role="status">摄像头已关闭</p>
+        <div class="camera-preview" id="camera-preview" hidden><video id="video" autoplay muted playsinline aria-label="镜像摄像头预览"></video></div>
+      </aside>
+      <p class="failure" id="failure" role="alert" hidden></p>
+      <noscript><p class="failure">请启用 JavaScript 以显示粒子花。</p></noscript>
+    </main>
+    <footer class="footer">
+      <p class="state" id="flower-state" aria-live="polite">已聚合</p>
+      <div class="modes" role="group" aria-label="花朵状态">
+        <button type="button" class="mode" id="gather" aria-pressed="true">聚合</button>
+        <button type="button" class="mode" id="scatter" aria-pressed="false">散开</button>
+      </div>
+      <p class="pointer-hint">移动鼠标也可转动视角、拨动粒子</p>
+    </footer>
+  </div>
+  <script type="module">
+    const $ = (selector) => document.querySelector(selector);
+    const failure = $('#failure');
+    try {
+      const [THREE, { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
+        import('three'),
+        import('three/addons/postprocessing/EffectComposer.js'),
+        import('three/addons/postprocessing/RenderPass.js'),
+        import('three/addons/postprocessing/UnrealBloomPass.js'),
+        import('three/addons/postprocessing/OutputPass.js'),
+      ]);
+      run(THREE, EffectComposer, RenderPass, UnrealBloomPass, OutputPass);
+    } catch (error) {
+      console.error(error);
+      failure.textContent = '3D 场景加载失败。请检查网络连接以及浏览器的 WebGL 2 支持，然后刷新。';
+      failure.hidden = false;
+      document.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+    }
+
+    function run(THREE, EffectComposer, RenderPass, UnrealBloomPass, OutputPass) {
+      const viewport = $('#viewport');
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+      const smallScreen = matchMedia('(max-width: 760px)');
+      const { clamp, damp, lerp } = THREE.MathUtils;
+      const pi = Math.PI;
+      const tau = 2 * pi;
+      let seed = 75313;
+      function random() {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed / 4294967296;
+      }
+      const range = (min, max) => lerp(min, max, random());
+      const choose = (values) => values[Math.floor(random() * values.length)];
+      const vec = (x, y, z) => new THREE.Vector3(x, y, z);
+      const palette = (colors) => colors.map((color) => new THREE.Color(color));
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.16;
+      renderer.domElement.setAttribute('aria-hidden', 'true');
+      viewport.append(renderer.domElement);
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0d0717);
+      const camera = new THREE.PerspectiveCamera(39, 1, .1, 75);
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), .76, .69, .66));
+      composer.addPass(new OutputPass());
+
+      const fingertips = Array.from({ length: 5 }, () => new THREE.Vector2());
+      const strengths = new Float32Array(5);
+      const uniforms = {
+        uSpread: { value: 0 }, uTime: { value: 0 }, uPointScale: { value: 1 },
+        uAspect: { value: 1 }, uImpulse: { value: 0 },
+        uFingers: { value: fingertips }, uStrengths: { value: strengths },
+      };
+      const data = { home: [], cloud: [], tint: [], motion: [], style: [] };
+      const darkViolet = palette([0x7441ba, 0x7947d2, 0x7651ed, 0x8d4dde, 0xa765ee]);
+      const violet = palette([0x9c52f6, 0xb46eff, 0xc17afb, 0xd291ff, 0x8a67f6]);
+      const lilac = palette([0xdd99ff, 0xf0b8ff, 0xbdaaff, 0xc77bff, 0xe6c0ff]);
+      const gold = palette([0xce782d, 0xea9737, 0xffb54d, 0xffcb68, 0xffdfa0]);
+      const ivory = new THREE.Color(0xffe5b2);
+
+      function addParticle(home, color, size, sparkle = 0) {
+        const azimuth = range(0, tau);
+        const z = range(-1, 1);
+        const r = Math.cbrt(random());
+        const side = Math.sqrt(1 - z * z) * r;
+        data.home.push(home.x, home.y, home.z);
+        data.cloud.push(Math.cos(azimuth) * side * 7.15, Math.sin(azimuth) * side * 4.63, z * r * 6.05);
+        data.tint.push(color.r, color.g, color.b);
+        data.motion.push(range(0, tau), range(.48, 1.52), range(.14, .63), range(0, .083));
+        data.style.push(size, sparkle, range(.59, 1.0));
+      }
+
+      // The flower and the drifting cloud use the same points and keep their color throughout the morph.
+      const headTilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(-.36, -.19, -.13));
+      const layers = [
+        { count: 12, root: .48, radius: 3.62, width: .88, depth: -.64, curl: .50, offset: .06, body: 404, tint: darkViolet },
+        { count: 11, root: .47, radius: 2.97, width: .77, depth: -.34, curl: .65, offset: .32, body: 360, tint: violet },
+        { count: 9, root: .50, radius: 2.18, width: .61, depth: -.03, curl: .74, offset: .12, body: 302, tint: violet },
+        { count: 8, root: .65, radius: 1.42, width: .44, depth: .22, curl: .78, offset: .46, body: 249, tint: lilac },
+      ];
+      for (const [layer, row] of layers.entries()) {
+        for (let petal = 0; petal < row.count; petal++) {
+          const angle = row.offset + petal / row.count * tau + range(-.074, .074);
+          const length = row.radius * range(.925, 1.075);
+          const width = row.width * range(.9, 1.15);
+          const curve = range(-.22, .26);
+          const depth = row.depth + range(-.12, .12);
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const petalPoint = (u, v, d = 0) => {
+            const arch = Math.sin(pi * u);
+            const edge = Math.pow(Math.max(0, Math.sin(pi * Math.pow(u, .85))), .61);
+            const radial = lerp(row.root, .23 + length, u) - .20 * v * v * edge * u;
+            const lateral = v * width * edge + curve * u * u;
+            const lift = depth + row.curl * Math.pow(u, 3.15) + arch * (.40 * v * v - .17) + .12 * v * u + d;
+            return vec(cos * radial - sin * lateral, sin * radial + cos * lateral, lift).applyQuaternion(headTilt);
+          };
+          for (let i = 0; i < row.body; i++) {
+            const u = range(.075, .997);
+            const v = range(-1, 1);
+            const glint = random() < .011 ? range(.39, .80) : 0;
+            const colors = random() < .027 + layer * .012 ? gold : Math.abs(v) > .77 ? violet : row.tint;
+            const size = glint ? range(.063, .105) : range(.012, layer < 2 ? .042 : .035);
+            addParticle(petalPoint(u, v, range(-.061, .063) * Math.sin(pi * u)), choose(colors), size, glint);
+          }
+          for (const side of [-1, 1]) {
+            for (let i = 0; i < 96; i++) {
+              const u = .08 + (i + random()) / 97 * .92;
+              const gilt = random() < (layer === 0 ? .19 : .11 + layer * .037);
+              const glint = random() < .018 ? range(.55, .94) : 0;
+              const color = choose(gilt ? gold : i % 7 < 4 ? lilac : violet);
+              addParticle(petalPoint(u, side * range(.93, 1.008), range(-.012, .032)), color, glint ? range(.079, .119) : range(.017, .044), glint);
+            }
+          }
+          for (const vein of [-.62, -.31, 0, .31, .62]) {
+            for (let i = 0; i < 22; i++) {
+              const u = .21 + (i + random()) / 22 * .71;
+              const v = vein * (.55 + .43 * u) + Math.sin(u * pi) * curve * .13;
+              const color = choose(vein === 0 && random() < .15 ? gold : row.tint);
+              addParticle(petalPoint(u, v, .013), color, range(.012, .028));
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < 1630; i++) {
+        const angle = i * 2.399963 + range(-.064, .064);
+        const radius = Math.sqrt((i + .5) / 1630) * range(.78, .89);
+        const z = .81 + Math.sqrt(Math.max(0, 1 - (radius / .90) ** 2)) * .51 + range(-.045, .068);
+        const p = vec(Math.cos(angle) * radius, Math.sin(angle) * radius, z).applyQuaternion(headTilt);
+        const glint = random() < .018 ? range(.50, .95) : 0;
+        addParticle(p, random() < .045 ? ivory : choose(gold), glint ? range(.066, .106) : range(.013, .041), glint);
+      }
+      for (let filament = 0; filament < 47; filament++) {
+        const angle = filament / 47 * tau + range(-.09, .09);
+        const height = range(.12, .36);
+        for (let i = 0; i < 14; i++) {
+          const u = (i + 1) / 14;
+          const r = lerp(.40, .98, u);
+          const turn = angle + u * u * .19;
+          const p = vec(Math.cos(turn) * r, Math.sin(turn) * r, .82 + Math.sin(u * pi * .7) * height).applyQuaternion(headTilt);
+          addParticle(p, choose(gold), i === 13 ? range(.058, .091) : range(.016, .033), i === 13 ? .67 : 0);
+        }
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(data.home, 3));
+      geometry.setAttribute('aCloud', new THREE.Float32BufferAttribute(data.cloud, 3));
+      geometry.setAttribute('aTint', new THREE.Float32BufferAttribute(data.tint, 3));
+      geometry.setAttribute('aMotion', new THREE.Float32BufferAttribute(data.motion, 4));
+      geometry.setAttribute('aStyle', new THREE.Float32BufferAttribute(data.style, 3));
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexShader: `
+          uniform float uSpread, uTime, uPointScale, uAspect, uImpulse;
+          uniform vec2 uFingers[5];
+          uniform float uStrengths[5];
+          attribute vec3 aCloud, aTint, aStyle;
+          attribute vec4 aMotion;
+          varying vec3 vTint;
+          varying vec2 vAxis;
+          varying float vLight, vSpark, vTouch, vTrail;
+
+          void main() {
+            float phase = uTime * aMotion.y + aMotion.x;
+            float spread = max(0., (uSpread - aMotion.w) / (1. - aMotion.w));
+            vec3 drift = vec3(sin(phase * 1.04), sin(phase * .78 + aMotion.x), cos(phase * .87)) * aMotion.z;
+            vec3 home = position + vec3(sin(phase * .34), cos(phase * .37), sin(phase * .43)) * .013;
+            vec3 p = mix(home, aCloud + drift, spread);
+            p += normalize(aCloud + vec3(.001)) * sin(spread * 3.14159) * aMotion.z * .26;
+            vec4 view = modelViewMatrix * vec4(p, 1.);
+            vec4 clip = projectionMatrix * view;
+            vec2 aspect = vec2(uAspect, 1.);
+            vec2 screen = clip.xy / clip.w;
+            vec2 pull = vec2(0.);
+            float touch = 0.;
+            for (int i = 0; i < 5; ++i) {
+              if (uStrengths[i] < .01) continue;
+              vec2 delta = (uFingers[i] - screen) * aspect;
+              float nearTip = exp(-dot(delta, delta) * 25.) * uStrengths[i];
+              pull += delta * nearTip;
+              touch += nearTip;
+            }
+            vTouch = min(.95, touch);
+            clip.xy += pull / aspect * clip.w * .16;
+            gl_Position = clip;
+
+            vec2 direction = (projectionMatrix * modelViewMatrix * vec4(aCloud - position, 0.)).xy * aspect;
+            vAxis = normalize(direction + vec2(.0001));
+            vTrail = uImpulse * mix(.38, .93, aStyle.z);
+            float twinkle = pow(.5 + .5 * sin(phase * (1.7 + aStyle.z)), 3.);
+            vLight = (.67 + .33 * twinkle) * aStyle.z;
+            vSpark = aStyle.y * (.50 + .50 * twinkle);
+            vTint = aTint;
+            float size = aStyle.x * uPointScale / max(3.5, -view.z);
+            gl_PointSize = clamp(size * (1. + vTouch * .41 + spread * .27 + vTrail * 1.24), 1.0, 30.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vTint;
+          varying vec2 vAxis;
+          varying float vLight, vSpark, vTouch, vTrail;
+          void main() {
+            vec2 q = gl_PointCoord * 2. - 1.;
+            float r2 = dot(q, q);
+            float core = exp(-r2 * (7.3 + vTrail * 5.0));
+            float halo = exp(-r2 * 3.4) * .24;
+            float rays = exp(-abs(q.x) * 30. - abs(q.y) * 3.7) + exp(-abs(q.y) * 30. - abs(q.x) * 3.7);
+            float along = dot(q, vAxis);
+            float across = dot(q, vec2(-vAxis.y, vAxis.x));
+            float trail = exp(-across * across * 82. - along * along * 4.2) * vTrail;
+            float alpha = (core + halo + vSpark * rays * .93 + trail * .52) * (1. - smoothstep(.70, 1., r2));
+            vec3 tint = mix(vTint, vec3(1., .67, .28), vTouch * .36);
+            float warm = smoothstep(.14, .71, tint.r - tint.b);
+            float intensity = (1.33 + core * 1.95 + vSpark * 1.27 + vTouch * .58) * mix(1., .79, warm);
+            gl_FragColor = vec4(tint * intensity, alpha * (vLight + vTouch * .24));
+          }
+        `,
+      });
+      const particles = new THREE.Points(geometry, material);
+      particles.frustumCulled = false;
+      scene.add(particles);
+
+      let scattered = false;
+      let spread = 0;
+      let spreadVelocity = 0;
+      let width = 1;
+      let height = 1;
+      const gatherButton = $('#gather');
+      const scatterButton = $('#scatter');
+      const flowerState = $('#flower-state');
+      function setScattered(next) {
+        if (next === scattered) return;
+        scattered = next;
+        scatterButton.setAttribute('aria-pressed', String(next));
+        gatherButton.setAttribute('aria-pressed', String(!next));
+        flowerState.textContent = next ? '已散开' : '已聚合';
+        viewport.setAttribute('aria-label', next ? '紫金色粒子在三维空间中漂浮' : '紫金色三维粒子聚合成一朵花');
+      }
+      scatterButton.addEventListener('click', () => setScattered(true));
+      gatherButton.addEventListener('click', () => setScattered(false));
+
+      const pointer = new THREE.Vector2();
+      let pointerActive = false;
+      function updatePointer(event) {
+        if (event.pointerType !== 'mouse' && event.type === 'pointermove' && event.buttons === 0) return;
+        const rect = viewport.getBoundingClientRect();
+        pointer.set(clamp((event.clientX - rect.left) / rect.width, 0, 1), clamp((event.clientY - rect.top) / rect.height, 0, 1));
+        pointerActive = true;
+      }
+      for (const name of ['pointermove', 'pointerdown']) viewport.addEventListener(name, updatePointer);
+      for (const name of ['pointerleave', 'pointercancel']) viewport.addEventListener(name, () => { pointerActive = false; });
+      viewport.addEventListener('pointerup', (event) => { if (event.pointerType !== 'mouse') pointerActive = false; });
+      window.addEventListener('blur', () => { pointerActive = false; });
+
+      let landmarks = null;
+      let handYaw = 0;
+      let handPitch = 0;
+      let yaw = 0;
+      let pitch = .01;
+      const aim = vec(0, 0, 0);
+      const tips = [8, 12, 16, 20, 4];
+      function updateTouches(dt, motionAllowed) {
+        for (let i = 0; i < tips.length; i++) {
+          const fingertip = landmarks?.[tips[i]];
+          const usePointer = !landmarks && pointerActive && i === 0;
+          let strength = 0;
+          if (fingertip || usePointer) {
+            const x = fingertip ? 1 - fingertip.x : pointer.x;
+            const y = fingertip ? fingertip.y : pointer.y;
+            const blend = strengths[i] < .03 || !motionAllowed ? 1 : 1 - Math.exp(-25 * dt);
+            fingertips[i].x = lerp(fingertips[i].x, x * 2 - 1, blend);
+            fingertips[i].y = lerp(fingertips[i].y, 1 - y * 2, blend);
+            strength = usePointer ? .91 : i === 0 ? .78 : .27;
+          }
+          strengths[i] = motionAllowed ? damp(strengths[i], strength, 20, dt) : strength * .50;
+        }
+      }
+
+      function resize() {
+        width = Math.max(1, viewport.clientWidth);
+        height = Math.max(1, viewport.clientHeight);
+        const pixelRatio = Math.min(devicePixelRatio, width > 1100 ? 1.45 : 1.65);
+        renderer.setPixelRatio(pixelRatio);
+        renderer.setSize(width, height, false);
+        composer.setPixelRatio(pixelRatio);
+        composer.setSize(width, height);
+        camera.setViewOffset(width, height, smallScreen.matches ? 0 : -width * .086, 0, width, height);
+        uniforms.uAspect.value = width / height;
+        uniforms.uPointScale.value = height * pixelRatio / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+      }
+      new ResizeObserver(resize).observe(viewport);
+      resize();
+
+      function advanceSpread(target, dt) {
+        // Critically damped motion preserves velocity when the gesture changes mid-transition.
+        const rate = 10.8;
+        const error = spread - target;
+        const carry = (spreadVelocity + rate * error) * dt;
+        const decay = Math.exp(-rate * dt);
+        spreadVelocity = (spreadVelocity - rate * carry) * decay;
+        spread = clamp(target + (error + carry) * decay, 0, 1);
+        if (Math.abs(spread - target) < .001 && Math.abs(spreadVelocity) < .009) {
+          spread = target;
+          spreadVelocity = 0;
+        }
+      }
+
+      let lastFrame = 0;
+      let time = .65;
+      function draw(now) {
+        requestAnimationFrame(draw);
+        const dt = lastFrame ? Math.min((now - lastFrame) / 1000, .072) : 0;
+        lastFrame = now;
+        const motionAllowed = !reducedMotion.matches;
+        const target = Number(scattered);
+        if (motionAllowed) {
+          time += dt;
+          advanceSpread(target, dt);
+        } else {
+          spread = target;
+          spreadVelocity = 0;
+        }
+
+        const idleYaw = motionAllowed ? Math.sin(time * .39) * .17 : 0;
+        const yawGoal = landmarks ? handYaw : pointerActive ? (pointer.x - .5) * .70 : idleYaw;
+        const pitchGoal = landmarks ? handPitch : pointerActive ? (.5 - pointer.y) * .43 : .035;
+        yaw = damp(yaw, yawGoal, 13.8, dt);
+        pitch = damp(pitch, pitchGoal, 13.8, dt);
+        const aspect = width / height;
+        const distance = lerp(Math.max(12.05, 12.18 / aspect), Math.max(17.0, 19.1 / aspect), spread);
+        camera.position.set(Math.sin(yaw) * Math.cos(pitch) * distance, Math.sin(pitch) * distance, Math.cos(yaw) * Math.cos(pitch) * distance);
+        camera.lookAt(aim);
+        camera.updateMatrixWorld();
+        uniforms.uSpread.value = spread;
+        uniforms.uTime.value = time;
+        uniforms.uImpulse.value = clamp(Math.abs(spreadVelocity) * .28, 0, .95);
+        updateTouches(dt, motionAllowed);
+        composer.render(dt);
+      }
+      requestAnimationFrame(draw);
+
+      const video = $('#video');
+      const cameraButton = $('#camera-button');
+      const handsBase = new URL('./vendor/hands/', import.meta.url).href;
+      let handsScript = null;
+      let cameraSession = null;
+      let cameraCleanup = Promise.resolve();
+
+      function status(message, tone = '') {
+        const element = $('#camera-status');
+        if (element.textContent !== message) element.textContent = message;
+        if (element.dataset.tone !== tone) element.dataset.tone = tone;
+      }
+
+      function loadHands() {
+        if (window.Hands) return Promise.resolve(window.Hands);
+        if (!handsScript) {
+          handsScript = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = `${handsBase}hands.js`;
+            script.crossOrigin = 'anonymous';
+            script.onload = () => window.Hands ? resolve(window.Hands) : reject(new Error('Hands export unavailable'));
+            script.onerror = () => { script.remove(); reject(new Error('Hands script unavailable')); };
+            document.head.append(script);
+          }).catch((error) => { handsScript = null; throw error; });
+        }
+        return handsScript;
+      }
+
+      function stopCamera(message = '摄像头已关闭', tone = '') {
+        const session = cameraSession;
+        cameraSession = null;
+        if (session) {
+          if (session.frame !== undefined) session.cancelFrame(session.frame);
+          session.stream?.getTracks().forEach((track) => track.stop());
+          cameraCleanup = cameraCleanup.then(() => session.setup).then(() => session.inFlight)
+            .catch(() => {}).then(() => session.hands?.close()).catch(console.warn);
+        }
+        landmarks = null;
+        video.srcObject = null;
+        $('#camera-preview').hidden = true;
+        $('#camera-label').textContent = '开启手势';
+        cameraButton.setAttribute('aria-pressed', 'false');
+        status(message, tone);
+      }
+
+      async function startCamera(session) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 30 } },
+        });
+        if (cameraSession !== session) { stream.getTracks().forEach((track) => track.stop()); return; }
+        session.stream = stream;
+        stream.getVideoTracks()[0].addEventListener('ended', () => {
+          if (cameraSession === session) stopCamera('摄像头连接已结束', 'error');
+        });
+        video.srcObject = stream;
+        await video.play();
+        if (cameraSession !== session) return;
+        $('#camera-preview').hidden = false;
+        status('正在加载手势模型…');
+        const Hands = await loadHands();
+        await session.cleanupBeforeStart;
+        if (cameraSession !== session) return;
+        const hands = new Hands({ locateFile: (name) => `${handsBase}${name}` });
+        session.hands = hands;
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: .60, minTrackingConfidence: .60 });
+        hands.onResults((results) => {
+          if (cameraSession === session) readHand(session, results.multiHandLandmarks?.[0]);
+        });
+        await hands.initialize();
+        if (cameraSession !== session) return;
+        status('请将一只手放入画面', 'active');
+        const videoFrames = typeof video.requestVideoFrameCallback === 'function';
+        const requestFrame = videoFrames ? video.requestVideoFrameCallback.bind(video) : requestAnimationFrame;
+        session.cancelFrame = videoFrames ? video.cancelVideoFrameCallback.bind(video) : cancelAnimationFrame;
+        const schedule = () => {
+          if (cameraSession === session) session.frame = requestFrame(process);
+        };
+        function process() {
+          session.frame = undefined;
+          if (cameraSession !== session) return;
+          if (video.readyState < 2 || video.currentTime === session.videoTime) { schedule(); return; }
+          session.videoTime = video.currentTime;
+          session.inFlight = hands.send({ image: video }).catch((error) => {
+            if (cameraSession !== session) return;
+            console.warn(error);
+            stopCamera('手势识别中断，可重新开启', 'error');
+          }).finally(() => {
+            session.inFlight = null;
+            schedule();
+          });
+        }
+        schedule();
+      }
+
+      function readHand(session, points) {
+        const now = performance.now();
+        if (!points || points.length !== 21) {
+          if (now - session.lastSeen > 100) landmarks = null;
+          if (now - session.lastSeen > 280) status('请将一只手放入画面', 'active');
+          session.raw = 'idle';
+          return;
+        }
+        landmarks = points;
+        session.lastSeen = now;
+        status('已识别手掌', 'active');
+        const ratio = video.videoHeight / video.videoWidth;
+        const p = points.map(({ x, y, z }) => vec(x, y * ratio, z));
+        const palmX = 1 - (p[0].x + p[5].x + p[9].x + p[17].x) * .25;
+        const palmY = (points[0].y + points[5].y + points[9].y + points[17].y) * .25;
+        handYaw = clamp((palmX - .5) * 2.55, -.93, .93);
+        handPitch = clamp((.53 - palmY) * 1.5 + .035, -.49, .49);
+        const palm = Math.max(.001, (p[0].distanceTo(p[9]) + p[5].distanceTo(p[17])) * .5);
+        const fingers = [5, 9, 13, 17].map((base) => {
+          const joint = p[base + 1];
+          const tip = p[base + 3];
+          const angle = p[base].clone().sub(joint).angleTo(tip.clone().sub(joint));
+          const reach = tip.distanceTo(p[0]) / Math.max(.001, joint.distanceTo(p[0]));
+          return { extended: angle > 2.46 && reach > 1.13, curled: angle < 2.04 || reach < 1.04 };
+        });
+        const thumbOut = p[4].distanceTo(p[8]) / palm > .53 && p[4].distanceTo(p[5]) / palm > .45;
+        const pose = fingers.every((finger) => finger.curled) ? 'fist' : thumbOut && fingers.every((finger) => finger.extended) ? 'open' : 'neutral';
+        if (session.raw !== pose) {
+          session.raw = pose;
+          session.entered = now;
+        } else if (now - session.entered >= 29) {
+          if (pose === 'fist') setScattered(false);
+          if (pose === 'open') setScattered(true);
+        }
+      }
+
+      const cameraErrors = {
+        NotAllowedError: '请在浏览器中允许摄像头访问',
+        SecurityError: '请在浏览器中允许摄像头访问',
+        NotFoundError: '未找到摄像头',
+        NotReadableError: '摄像头可能被其他程序占用',
+      };
+      cameraButton.addEventListener('click', () => {
+        if (cameraSession) { stopCamera(); return; }
+        if (!navigator.mediaDevices?.getUserMedia) { status('请用支持摄像头的浏览器打开此 HTTPS 页面', 'error'); return; }
+        const session = { raw: 'idle', entered: 0, lastSeen: 0, videoTime: -1, cleanupBeforeStart: cameraCleanup };
+        cameraSession = session;
+        status('正在启动摄像头…');
+        cameraButton.setAttribute('aria-pressed', 'true');
+        $('#camera-label').textContent = '关闭手势';
+        session.setup = startCamera(session).catch((error) => {
+          if (cameraSession !== session) return;
+          console.warn(error);
+          stopCamera(cameraErrors[error.name] || '手势识别启动失败，请检查网络后重试', 'error');
+        });
+      });
+      window.addEventListener('pagehide', () => stopCamera());
+      renderer.domElement.addEventListener('webglcontextlost', (event) => {
+        event.preventDefault();
+        failure.textContent = '3D 场景暂时中断，正在等待浏览器恢复。';
+        failure.hidden = false;
+      });
+      renderer.domElement.addEventListener('webglcontextrestored', () => { failure.hidden = true; });
+    }
+  </script>
+</body>
+</html>
