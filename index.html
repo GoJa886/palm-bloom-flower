@@ -621,7 +621,12 @@
       const video = $('#video');
       const cameraButton = $('#camera-button');
       const handsBase = new URL('./vendor/hands/', import.meta.url).href;
-      const modelFiles = ['hands_solution_packed_assets.data', 'hand_landmark_lite.tflite'];
+      const modelMirror = 'https://cdn.jsdelivr.net/gh/GoJa886/palm-bloom-flower@9b61d46c3e5521f1da0e6c683286378b0c41042b/vendor/hands/';
+      const packedAsset = { stem: 'hands_solution_packed_assets_lite', bytes: 1985451 };
+      const modelFiles = [
+        { key: 'hands_solution_packed_assets.data', name: `${packedAsset.stem}.data`, bytes: packedAsset.bytes },
+        { key: 'hand_landmark_lite.tflite', name: 'hand_landmark_lite.tflite', bytes: 2071408 },
+      ];
       let cameraSession = null;
       let cameraCleanup = Promise.resolve();
 
@@ -653,17 +658,55 @@
         });
       }
 
-      async function downloadModelFile(name, signal) {
-        for (const cache of ['default', 'reload']) {
+      async function downloadModelFile(file, signal, reportProgress) {
+        for (const [attempt, base] of [handsBase, modelMirror].entries()) {
+          if (signal.aborted) throw signal.reason;
+          const request = new AbortController();
+          const cancel = () => request.abort(signal.reason);
+          signal.addEventListener('abort', cancel, { once: true });
+          let idle;
+          function expectData() {
+            clearTimeout(idle);
+            idle = setTimeout(() => request.abort(new DOMException('Model download made no progress', 'TimeoutError')), 12000);
+          }
+
           try {
-            const response = await fetch(`${handsBase}${name}`, { signal, cache });
-            if (!response.ok) throw new Error(`HTTP ${response.status} for ${name}`);
-            const blob = await response.blob();
-            if (!blob.size || blob.type.includes('text/html')) throw new Error(`Invalid model data for ${name}`);
+            reportProgress(file.key, 0, attempt);
+            expectData();
+            const response = await fetch(`${base}${file.name}`, { signal: request.signal, cache: attempt ? 'reload' : 'default' });
+            if (!response.ok) throw new Error(`HTTP ${response.status} for ${file.name}`);
+            let blob;
+            if (response.body?.getReader) {
+              const reader = response.body.getReader();
+              const chunks = [];
+              let loaded = 0;
+              while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                expectData();
+                chunks.push(value);
+                loaded += value.byteLength;
+                if (loaded > file.bytes) throw new Error(`Unexpected model size for ${file.name}`);
+                reportProgress(file.key, loaded, attempt);
+              }
+              blob = new Blob(chunks, { type: 'application/octet-stream' });
+            } else {
+              clearTimeout(idle);
+              blob = await response.blob();
+            }
+            if (blob.size !== file.bytes) throw new Error(`Incomplete model file: ${file.name}`);
+            reportProgress(file.key, file.bytes, attempt);
             return blob;
           } catch (error) {
             if (signal.aborted) throw signal.reason || error;
-            if (cache === 'reload') throw new DOMException(error.message, 'ModelDownloadError');
+            if (attempt) {
+              const failure = request.signal.reason || error;
+              throw new DOMException(failure.message, failure.name === 'TimeoutError' ? 'ModelDownloadTimeout' : 'ModelDownloadError');
+            }
+          } finally {
+            clearTimeout(idle);
+            signal.removeEventListener('abort', cancel);
+            request.abort();
           }
         }
       }
@@ -680,18 +723,35 @@
           clearTimeout(deadline);
           clearTimeout(slowHint);
           status(message);
-          slowHint = setTimeout(() => { if (cameraSession === session) status(slowMessage); }, 8000);
-          deadline = setTimeout(() => controller.abort(new DOMException(slowMessage, failureName)), duration);
+          if (slowMessage) slowHint = setTimeout(() => { if (cameraSession === session) status(slowMessage); }, 8000);
+          deadline = setTimeout(() => controller.abort(new DOMException(slowMessage || message, failureName)), duration);
         }
 
         try {
-          showPhase('正在下载手势资源…', '首次加载需要下载模型，网络较慢时请稍候…', 45000, 'ModelDownloadTimeout');
-          const downloads = Promise.all([loadHands(signal), ...modelFiles.map((name) => downloadModelFile(name, signal))]);
+          const transfers = new Map();
+          const totalBytes = modelFiles.reduce((total, file) => total + file.bytes, 0);
+          function reportProgress(key, loaded, attempt) {
+            if (cameraSession !== session || signal.aborted) return;
+            transfers.set(key, { loaded, attempt });
+            let downloaded = 0;
+            let retrying = false;
+            for (const transfer of transfers.values()) {
+              downloaded += transfer.loaded;
+              retrying ||= Boolean(transfer.attempt);
+            }
+            const percent = Math.min(99, Math.floor(downloaded / totalBytes * 100));
+            status(`${retrying ? '正在重试下载' : '正在下载手势模型'} · ${percent}%`);
+          }
+          showPhase('正在下载手势模型 · 0%', '', 45000, 'ModelDownloadTimeout');
+          const downloads = Promise.all([loadHands(signal), ...modelFiles.map((file) => downloadModelFile(file, signal, reportProgress))]);
           const [Hands, ...files] = await Promise.race([downloads, cancelled]);
-          session.modelAssets = new Map(modelFiles.map((name, i) => [name, URL.createObjectURL(files[i])]));
+          session.modelAssets = new Map(modelFiles.map((file, i) => [file.key, URL.createObjectURL(files[i])]));
           showPhase('正在初始化手势模型…', '正在初始化手势模型，设备较慢时请稍候…', 25000, 'ModelInitTimeout');
           await Promise.race([session.cleanupBeforeStart, cancelled]);
-          const hands = new Hands({ locateFile: (name) => session.modelAssets.get(name) ?? `${handsBase}${name}` });
+          const hands = new Hands({ locateFile: (name) => {
+            if (name === 'hands_solution_packed_assets_loader.js') return `${handsBase}${packedAsset.stem}_loader.js`;
+            return session.modelAssets.get(name) ?? `${handsBase}${name}`;
+          } });
           session.hands = hands;
           hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: .60, minTrackingConfidence: .60 });
           hands.onResults((results) => {
