@@ -621,7 +621,7 @@
       const video = $('#video');
       const cameraButton = $('#camera-button');
       const handsBase = new URL('./vendor/hands/', import.meta.url).href;
-      let handsScript = null;
+      const modelFiles = ['hands_solution_packed_assets.data', 'hand_landmark_lite.tflite'];
       let cameraSession = null;
       let cameraCleanup = Promise.resolve();
 
@@ -631,34 +631,103 @@
         if (element.dataset.tone !== tone) element.dataset.tone = tone;
       }
 
-      function loadHands() {
+      function loadHands(signal) {
         if (window.Hands) return Promise.resolve(window.Hands);
-        if (!handsScript) {
-          handsScript = new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = `${handsBase}hands.js`;
-            script.crossOrigin = 'anonymous';
-            script.onload = () => window.Hands ? resolve(window.Hands) : reject(new Error('Hands export unavailable'));
-            script.onerror = () => { script.remove(); reject(new Error('Hands script unavailable')); };
-            document.head.append(script);
-          }).catch((error) => { handsScript = null; throw error; });
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          const abort = () => finish(signal.reason || new DOMException('Model start cancelled', 'AbortError'));
+          function finish(error) {
+            signal.removeEventListener('abort', abort);
+            script.onload = script.onerror = null;
+            script.remove();
+            if (error) reject(error);
+            else resolve(window.Hands);
+          }
+          if (signal.aborted) { abort(); return; }
+          signal.addEventListener('abort', abort, { once: true });
+          script.src = `${handsBase}hands.js`;
+          script.crossOrigin = 'anonymous';
+          script.onload = () => finish(window.Hands ? null : new DOMException('Hands export unavailable', 'ModelDownloadError'));
+          script.onerror = () => finish(new DOMException('Hands script unavailable', 'ModelDownloadError'));
+          document.head.append(script);
+        });
+      }
+
+      async function downloadModelFile(name, signal) {
+        for (const cache of ['default', 'reload']) {
+          try {
+            const response = await fetch(`${handsBase}${name}`, { signal, cache });
+            if (!response.ok) throw new Error(`HTTP ${response.status} for ${name}`);
+            const blob = await response.blob();
+            if (!blob.size || blob.type.includes('text/html')) throw new Error(`Invalid model data for ${name}`);
+            return blob;
+          } catch (error) {
+            if (signal.aborted) throw signal.reason || error;
+            if (cache === 'reload') throw new DOMException(error.message, 'ModelDownloadError');
+          }
         }
-        return handsScript;
+      }
+
+      async function initializeHands(session) {
+        const controller = session.modelController = new AbortController();
+        const signal = controller.signal;
+        const cancelled = new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason || new DOMException('Model start cancelled', 'AbortError')), { once: true });
+        });
+        let deadline;
+        let slowHint;
+        function showPhase(message, slowMessage, duration, failureName) {
+          clearTimeout(deadline);
+          clearTimeout(slowHint);
+          status(message);
+          slowHint = setTimeout(() => { if (cameraSession === session) status(slowMessage); }, 8000);
+          deadline = setTimeout(() => controller.abort(new DOMException(slowMessage, failureName)), duration);
+        }
+
+        try {
+          showPhase('正在下载手势资源…', '首次加载需要下载模型，网络较慢时请稍候…', 45000, 'ModelDownloadTimeout');
+          const downloads = Promise.all([loadHands(signal), ...modelFiles.map((name) => downloadModelFile(name, signal))]);
+          const [Hands, ...files] = await Promise.race([downloads, cancelled]);
+          session.modelAssets = new Map(modelFiles.map((name, i) => [name, URL.createObjectURL(files[i])]));
+          showPhase('正在初始化手势模型…', '正在初始化手势模型，设备较慢时请稍候…', 25000, 'ModelInitTimeout');
+          await Promise.race([session.cleanupBeforeStart, cancelled]);
+          const hands = new Hands({ locateFile: (name) => session.modelAssets.get(name) ?? `${handsBase}${name}` });
+          session.hands = hands;
+          hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: .60, minTrackingConfidence: .60 });
+          hands.onResults((results) => {
+            if (cameraSession === session) readHand(session, results.multiHandLandmarks?.[0]);
+          });
+          const initialization = Promise.resolve().then(() => hands.initialize());
+          initialization.then(
+            () => { if (signal.aborted) return hands.close(); },
+            () => hands.close(),
+          ).catch(console.warn);
+          await Promise.race([initialization, cancelled]);
+          session.modelReady = true;
+          return hands;
+        } finally {
+          clearTimeout(deadline);
+          clearTimeout(slowHint);
+        }
       }
 
       function stopCamera(message = '摄像头已关闭', tone = '') {
         const session = cameraSession;
         cameraSession = null;
         if (session) {
+          session.modelController?.abort();
           if (session.frame !== undefined) session.cancelFrame(session.frame);
           session.stream?.getTracks().forEach((track) => track.stop());
-          cameraCleanup = cameraCleanup.then(() => session.setup).then(() => session.inFlight)
-            .catch(() => {}).then(() => session.hands?.close()).catch(console.warn);
+          if (session.modelReady) {
+            cameraCleanup = cameraCleanup.then(() => session.inFlight).catch(() => {})
+              .then(() => session.hands.close()).catch(console.warn);
+          }
+          session.modelAssets?.forEach((url) => URL.revokeObjectURL(url));
         }
         landmarks = null;
         video.srcObject = null;
         $('#camera-preview').hidden = true;
-        $('#camera-label').textContent = '开启手势';
+        $('#camera-label').textContent = tone === 'error' ? '重试手势' : '开启手势';
         cameraButton.setAttribute('aria-pressed', 'false');
         status(message, tone);
       }
@@ -677,17 +746,7 @@
         await video.play();
         if (cameraSession !== session) return;
         $('#camera-preview').hidden = false;
-        status('正在加载手势模型…');
-        const Hands = await loadHands();
-        await session.cleanupBeforeStart;
-        if (cameraSession !== session) return;
-        const hands = new Hands({ locateFile: (name) => `${handsBase}${name}` });
-        session.hands = hands;
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: .60, minTrackingConfidence: .60 });
-        hands.onResults((results) => {
-          if (cameraSession === session) readHand(session, results.multiHandLandmarks?.[0]);
-        });
-        await hands.initialize();
+        const hands = await initializeHands(session);
         if (cameraSession !== session) return;
         status('请将一只手放入画面', 'active');
         const videoFrames = typeof video.requestVideoFrameCallback === 'function';
@@ -754,6 +813,9 @@
         SecurityError: '请在浏览器中允许摄像头访问',
         NotFoundError: '未找到摄像头',
         NotReadableError: '摄像头可能被其他程序占用',
+        ModelDownloadError: '手势资源下载失败，请检查网络后重试',
+        ModelDownloadTimeout: '手势资源下载超时，请检查网络后重试',
+        ModelInitTimeout: '手势模型启动超时，可重试或用系统浏览器打开',
       };
       cameraButton.addEventListener('click', () => {
         if (cameraSession) { stopCamera(); return; }
@@ -763,7 +825,7 @@
         status('正在启动摄像头…');
         cameraButton.setAttribute('aria-pressed', 'true');
         $('#camera-label').textContent = '关闭手势';
-        session.setup = startCamera(session).catch((error) => {
+        startCamera(session).catch((error) => {
           if (cameraSession !== session) return;
           console.warn(error);
           stopCamera(cameraErrors[error.name] || '手势识别启动失败，请检查网络后重试', 'error');
