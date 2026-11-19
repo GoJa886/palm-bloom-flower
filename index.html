@@ -143,7 +143,7 @@
       <section class="intro" aria-labelledby="title">
         <h1 id="title"><span>掌心</span><span>花开</span></h1>
         <span class="intro-divider" aria-hidden="true"></span>
-        <p>用手势聚拢、散开粒子。</p>
+        <p>手指逐根张开，花瓣逐片绽放。</p>
         <div class="color-control">
           <label for="flower-color">花色</label>
           <input class="color-range" id="flower-color" type="range" min="0" max="100" value="0" aria-valuetext="深紫色">
@@ -154,9 +154,9 @@
         <h2 id="guide-title">手势指南</h2>
         <dl>
           <div><dt>握拳</dt><dd>聚成花朵</dd></div>
-          <div><dt>张开手掌</dt><dd>散开粒子</dd></div>
+          <div><dt>伸开一指</dt><dd>打开一片花瓣</dd></div>
+          <div><dt>张开五指</dt><dd>全部散开</dd></div>
           <div><dt>移动手掌</dt><dd>转动视角</dd></div>
-          <div><dt>移动指尖</dt><dd>拨动粒子</dd></div>
         </dl>
         <p class="status" id="camera-status" role="status">摄像头已关闭</p>
         <div class="camera-preview" id="camera-preview" hidden><video id="video" autoplay muted playsinline aria-label="镜像摄像头预览"></video></div>
@@ -199,7 +199,7 @@
       const viewport = $('#viewport');
       const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
       const smallScreen = matchMedia('(max-width: 760px)');
-      const { clamp, damp, lerp } = THREE.MathUtils;
+      const { clamp, damp, lerp, smootherstep } = THREE.MathUtils;
       const pi = Math.PI;
       const tau = 2 * pi;
       let seed = 75313;
@@ -232,6 +232,11 @@
 
       const fingertips = Array.from({ length: 5 }, () => new THREE.Vector2());
       const strengths = new Float32Array(5);
+      const petalCount = 5;
+      const petalOpenings = new Float32Array(petalCount);
+      const petalTargets = new Float32Array(petalCount);
+      const petalVelocities = new Float32Array(petalCount);
+      const petalTrails = new Float32Array(petalCount);
       const colorRange = $('#flower-color');
       let shade = Number(colorRange.value) / 100;
       colorRange.addEventListener('input', () => {
@@ -241,10 +246,11 @@
       });
       const uniforms = {
         uSpread: { value: 0 }, uTime: { value: 0 }, uPointScale: { value: 1 },
-        uAspect: { value: 1 }, uImpulse: { value: 0 }, uShade: { value: shade },
+        uAspect: { value: 1 }, uShade: { value: shade },
+        uPetals: { value: petalOpenings }, uPetalTrails: { value: petalTrails },
         uFingers: { value: fingertips }, uStrengths: { value: strengths },
       };
-      const data = { home: [], cloud: [], tint: [], coolTint: [], motion: [], style: [] };
+      const data = { home: [], cloud: [], tint: [], coolTint: [], motion: [], style: [], petal: [] };
       const darkViolet = palette([0x7441ba, 0x7947d2, 0x7651ed, 0x8d4dde, 0xa765ee]);
       const violet = palette([0x9c52f6, 0xb46eff, 0xc17afb, 0xd291ff, 0x8a67f6]);
       const lilac = palette([0xdd99ff, 0xf0b8ff, 0xbdaaff, 0xc77bff, 0xe6c0ff]);
@@ -257,7 +263,7 @@
         return [color, new THREE.Color().setHSL(hue, .70 + s * .23, lightness, THREE.SRGBColorSpace)];
       }));
 
-      function addParticle(home, color, size, sparkle = 0) {
+      function addParticle(home, color, size, sparkle, petal) {
         const azimuth = range(0, tau);
         const z = range(-1, 1);
         const r = Math.cbrt(random());
@@ -269,19 +275,26 @@
         data.coolTint.push(cool.r, cool.g, cool.b);
         data.motion.push(range(0, tau), range(.48, 1.52), range(.14, .63), range(0, .083));
         data.style.push(size, sparkle, range(.59, 1.0));
+        data.petal.push(petal);
       }
 
       // The flower and the drifting cloud share the same particle geometry.
       const headTilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(-.36, -.19, -.13));
+      const petalSpacing = tau / petalCount;
+      const firstPetalAngle = pi / 2 + 2 * petalSpacing;
+      const petalAtAngle = (angle) => ((Math.round((firstPetalAngle - angle) / petalSpacing) % petalCount) + petalCount) % petalCount;
       const layers = [
-        { count: 12, root: .48, radius: 3.62, width: .88, depth: -.64, curl: .50, offset: .06, body: 404, tint: darkViolet },
-        { count: 11, root: .47, radius: 2.97, width: .77, depth: -.34, curl: .65, offset: .32, body: 360, tint: violet },
-        { count: 9, root: .50, radius: 2.18, width: .61, depth: -.03, curl: .74, offset: .12, body: 302, tint: violet },
-        { count: 8, root: .65, radius: 1.42, width: .44, depth: .22, curl: .78, offset: .46, body: 249, tint: lilac },
+        { density: 2.4, root: .48, radius: 3.62, width: 1.45, depth: -.64, curl: .50, offset: .025, body: 404, tint: darkViolet },
+        { density: 2.2, root: .47, radius: 2.97, width: 1.17, depth: -.34, curl: .65, offset: .06, body: 360, tint: violet },
+        { density: 1.8, root: .50, radius: 2.18, width: .87, depth: -.03, curl: .74, offset: -.085, body: 302, tint: violet },
+        { density: 1.6, root: .65, radius: 1.42, width: .54, depth: .22, curl: .78, offset: .115, body: 249, tint: lilac },
       ];
       for (const [layer, row] of layers.entries()) {
-        for (let petal = 0; petal < row.count; petal++) {
-          const angle = row.offset + petal / row.count * tau + range(-.074, .074);
+        const bodyCount = Math.round(row.body * row.density);
+        const edgeCount = Math.round(96 * row.density);
+        const veinCount = Math.round(22 * row.density);
+        for (let petal = 0; petal < petalCount; petal++) {
+          const angle = firstPetalAngle - petal * petalSpacing + row.offset + range(-.04, .04);
           const length = row.radius * range(.925, 1.075);
           const width = row.width * range(.9, 1.15);
           const curve = range(-.22, .26);
@@ -296,29 +309,29 @@
             const lift = depth + row.curl * Math.pow(u, 3.15) + arch * (.40 * v * v - .17) + .12 * v * u + d;
             return vec(cos * radial - sin * lateral, sin * radial + cos * lateral, lift).applyQuaternion(headTilt);
           };
-          for (let i = 0; i < row.body; i++) {
+          for (let i = 0; i < bodyCount; i++) {
             const u = range(.075, .997);
             const v = range(-1, 1);
             const glint = random() < .011 ? range(.39, .80) : 0;
             const colors = random() < .027 + layer * .012 ? gold : Math.abs(v) > .77 ? violet : row.tint;
             const size = glint ? range(.063, .105) : range(.012, layer < 2 ? .042 : .035);
-            addParticle(petalPoint(u, v, range(-.061, .063) * Math.sin(pi * u)), choose(colors), size, glint);
+            addParticle(petalPoint(u, v, range(-.061, .063) * Math.sin(pi * u)), choose(colors), size, glint, petal);
           }
           for (const side of [-1, 1]) {
-            for (let i = 0; i < 96; i++) {
-              const u = .08 + (i + random()) / 97 * .92;
+            for (let i = 0; i < edgeCount; i++) {
+              const u = .08 + (i + random()) / (edgeCount + 1) * .92;
               const gilt = random() < (layer === 0 ? .19 : .11 + layer * .037);
               const glint = random() < .018 ? range(.55, .94) : 0;
               const color = choose(gilt ? gold : i % 7 < 4 ? lilac : violet);
-              addParticle(petalPoint(u, side * range(.93, 1.008), range(-.012, .032)), color, glint ? range(.079, .119) : range(.017, .044), glint);
+              addParticle(petalPoint(u, side * range(.93, 1.008), range(-.012, .032)), color, glint ? range(.079, .119) : range(.017, .044), glint, petal);
             }
           }
           for (const vein of [-.62, -.31, 0, .31, .62]) {
-            for (let i = 0; i < 22; i++) {
-              const u = .21 + (i + random()) / 22 * .71;
+            for (let i = 0; i < veinCount; i++) {
+              const u = .21 + (i + random()) / veinCount * .71;
               const v = vein * (.55 + .43 * u) + Math.sin(u * pi) * curve * .13;
               const color = choose(vein === 0 && random() < .15 ? gold : row.tint);
-              addParticle(petalPoint(u, v, .013), color, range(.012, .028));
+              addParticle(petalPoint(u, v, .013), color, range(.012, .028), 0, petal);
             }
           }
         }
@@ -330,7 +343,7 @@
         const z = .81 + Math.sqrt(Math.max(0, 1 - (radius / .90) ** 2)) * .51 + range(-.045, .068);
         const p = vec(Math.cos(angle) * radius, Math.sin(angle) * radius, z).applyQuaternion(headTilt);
         const glint = random() < .018 ? range(.50, .95) : 0;
-        addParticle(p, random() < .045 ? ivory : choose(gold), glint ? range(.066, .106) : range(.013, .041), glint);
+        addParticle(p, random() < .045 ? ivory : choose(gold), glint ? range(.066, .106) : range(.013, .041), glint, petalAtAngle(angle));
       }
       for (let filament = 0; filament < 47; filament++) {
         const angle = filament / 47 * tau + range(-.09, .09);
@@ -340,7 +353,7 @@
           const r = lerp(.40, .98, u);
           const turn = angle + u * u * .19;
           const p = vec(Math.cos(turn) * r, Math.sin(turn) * r, .82 + Math.sin(u * pi * .7) * height).applyQuaternion(headTilt);
-          addParticle(p, choose(gold), i === 13 ? range(.058, .091) : range(.016, .033), i === 13 ? .67 : 0);
+          addParticle(p, choose(gold), i === 13 ? range(.058, .091) : range(.016, .033), i === 13 ? .67 : 0, petalAtAngle(angle));
         }
       }
 
@@ -351,25 +364,35 @@
       geometry.setAttribute('aCoolTint', new THREE.Float32BufferAttribute(data.coolTint, 3));
       geometry.setAttribute('aMotion', new THREE.Float32BufferAttribute(data.motion, 4));
       geometry.setAttribute('aStyle', new THREE.Float32BufferAttribute(data.style, 3));
+      geometry.setAttribute('aPetal', new THREE.Float32BufferAttribute(data.petal, 1));
       const material = new THREE.ShaderMaterial({
         uniforms,
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
         vertexShader: `
-          uniform float uSpread, uTime, uPointScale, uAspect, uImpulse, uShade;
+          uniform float uSpread, uTime, uPointScale, uAspect, uShade;
+          uniform float uPetals[5], uPetalTrails[5];
           uniform vec2 uFingers[5];
           uniform float uStrengths[5];
           attribute vec3 aCloud, aTint, aCoolTint, aStyle;
           attribute vec4 aMotion;
+          attribute float aPetal;
           varying vec3 vTint;
           varying vec2 vAxis;
           varying float vLight, vSpark, vTouch, vTrail;
 
           void main() {
             float phase = uTime * aMotion.y + aMotion.x;
-            float spread = max(0., (uSpread - aMotion.w) / (1. - aMotion.w));
+            int petal = int(aPetal);
+            float opening = uPetals[petal];
+            float unfold = smoothstep(0., .62, opening);
+            float spread = smoothstep(.14, 1., max(0., (opening - aMotion.w) / (1. - aMotion.w)));
             vec3 drift = vec3(sin(phase * 1.04), sin(phase * .78 + aMotion.x), cos(phase * .87)) * aMotion.z;
             vec3 home = position + vec3(sin(phase * .34), cos(phase * .37), sin(phase * .43)) * .013;
-            vec3 p = mix(home, aCloud + drift, spread);
+            home.xy *= 1. + .25 * unfold;
+            home.z += .34 * unfold;
+            float cloudSize = smoothstep(.18, .93, uSpread);
+            vec3 cloud = aCloud * mix(.62, 1., cloudSize) + position * (.42 * (1. - cloudSize));
+            vec3 p = mix(home, cloud + drift, spread);
             p += normalize(aCloud + vec3(.001)) * sin(spread * 3.14159) * aMotion.z * .26;
             vec4 view = modelViewMatrix * vec4(p, 1.);
             vec4 clip = projectionMatrix * view;
@@ -390,7 +413,7 @@
 
             vec2 direction = (projectionMatrix * modelViewMatrix * vec4(aCloud - position, 0.)).xy * aspect;
             vAxis = normalize(direction + vec2(.0001));
-            vTrail = uImpulse * mix(.38, .93, aStyle.z);
+            vTrail = uPetalTrails[petal] * mix(.38, .93, aStyle.z);
             float twinkle = pow(.5 + .5 * sin(phase * (1.7 + aStyle.z)), 3.);
             vLight = (.67 + .33 * twinkle) * aStyle.z;
             vSpark = aStyle.y * (.50 + .50 * twinkle);
@@ -424,9 +447,7 @@
       particles.frustumCulled = false;
       scene.add(particles);
 
-      let scattered = false;
       let spread = 0;
-      let spreadVelocity = 0;
       let width = 1;
       let height = 1;
       const gatherButton = $('#gather');
@@ -436,21 +457,29 @@
       const openingStage = $('#opening-stage');
       const openingPercent = $('#opening-percent');
       let lastPercent = 0;
-      function setScattered(next) {
-        if (next === scattered) return;
-        scattered = next;
-        scatterButton.setAttribute('aria-pressed', String(next));
-        gatherButton.setAttribute('aria-pressed', String(!next));
-        viewport.setAttribute('aria-label', next ? '彩色粒子在三维空间中漂浮' : '彩色三维粒子聚合成一朵花');
+      let buttonMode = 'gather';
+      function updateModeButtons() {
+        const mode = petalTargets.every((value) => value === 0) ? 'gather'
+          : petalTargets.every((value) => value === 1) ? 'scatter' : 'partial';
+        if (mode === buttonMode) return;
+        buttonMode = mode;
+        gatherButton.setAttribute('aria-pressed', String(mode === 'gather'));
+        scatterButton.setAttribute('aria-pressed', String(mode === 'scatter'));
+        viewport.setAttribute('aria-label', mode === 'gather' ? '彩色三维粒子聚合成一朵花'
+          : mode === 'scatter' ? '彩色粒子在三维空间中漂浮' : '五片粒子花瓣各自展开');
       }
-      scatterButton.addEventListener('click', () => setScattered(true));
-      gatherButton.addEventListener('click', () => setScattered(false));
+      for (const [button, target] of [[gatherButton, 0], [scatterButton, 1]]) {
+        button.addEventListener('click', () => {
+          petalTargets.fill(target);
+          updateModeButtons();
+        });
+      }
 
       function updateOpeningMeter() {
         const percent = spread === 0 || spread === 1 ? spread * 100 : clamp(Math.round(spread * 100), 1, 99);
         if (percent === lastPercent) return;
         lastPercent = percent;
-        const label = percent < 20 ? '花苞' : percent < 80 ? '舒展' : '绽放';
+        const label = percent === 0 ? '花苞' : percent < 80 ? '舒展' : '绽放';
         if (openingStage.textContent !== label) openingStage.textContent = label;
         openingPercent.textContent = `${percent}%`;
         openingMeter.setAttribute('aria-valuenow', String(percent));
@@ -566,18 +595,31 @@
       new ResizeObserver(resize).observe(viewport);
       resize();
 
-      function advanceSpread(target, dt) {
-        // Critically damped motion preserves velocity when the gesture changes mid-transition.
-        const rate = 10.8;
-        const error = spread - target;
-        const carry = (spreadVelocity + rate * error) * dt;
+      function advancePetals(dt, motionAllowed) {
+        // Each spring keeps its velocity when a finger reverses mid-motion.
+        const rate = 6.8;
         const decay = Math.exp(-rate * dt);
-        spreadVelocity = (spreadVelocity - rate * carry) * decay;
-        spread = clamp(target + (error + carry) * decay, 0, 1);
-        if (Math.abs(spread - target) < .001 && Math.abs(spreadVelocity) < .009) {
-          spread = target;
-          spreadVelocity = 0;
+        let total = 0;
+        for (let i = 0; i < petalCount; i++) {
+          const target = petalTargets[i];
+          let opening = target;
+          let velocity = 0;
+          if (motionAllowed) {
+            const error = petalOpenings[i] - target;
+            const carry = (petalVelocities[i] + rate * error) * dt;
+            opening = clamp(target + (error + carry) * decay, 0, 1);
+            velocity = (petalVelocities[i] - rate * carry) * decay;
+            if (Math.abs(opening - target) < .001 && Math.abs(velocity) < .009) {
+              opening = target;
+              velocity = 0;
+            }
+          }
+          petalOpenings[i] = opening;
+          petalVelocities[i] = velocity;
+          petalTrails[i] = clamp(Math.abs(velocity) * .36, 0, .95);
+          total += opening;
         }
+        spread = total / petalCount;
       }
 
       let lastFrame = 0;
@@ -587,19 +629,13 @@
         const dt = lastFrame ? Math.min((now - lastFrame) / 1000, .072) : 0;
         lastFrame = now;
         const motionAllowed = !reducedMotion.matches;
-        const target = Number(scattered);
-        if (motionAllowed) {
-          time += dt;
-          advanceSpread(target, dt);
-        } else {
-          spread = target;
-          spreadVelocity = 0;
-        }
+        if (motionAllowed) time += dt;
+        advancePetals(dt, motionAllowed);
         updateOpeningMeter();
 
         const idleYaw = motionAllowed ? Math.sin(time * .39) * .17 : 0;
-        const yawGoal = landmarks ? handYaw : pointerActive ? (pointer.x - .5) * .70 : idleYaw;
-        const pitchGoal = landmarks ? handPitch : pointerActive ? (.5 - pointer.y) * .43 : .035;
+        const yawGoal = landmarks ? handYaw : pointerActive ? (.5 - pointer.x) * .70 : idleYaw;
+        const pitchGoal = landmarks ? handPitch : pointerActive ? (pointer.y - .5) * .43 : .035;
         yaw = damp(yaw, yawGoal, 13.8, dt);
         pitch = damp(pitch, pitchGoal, 13.8, dt);
         const aspect = width / height;
@@ -609,7 +645,6 @@
         camera.updateMatrixWorld();
         uniforms.uSpread.value = spread;
         uniforms.uTime.value = time;
-        uniforms.uImpulse.value = clamp(Math.abs(spreadVelocity) * .28, 0, .95);
         const tint = motionAllowed ? damp(uniforms.uShade.value, shade, 23, dt) : shade;
         uniforms.uShade.value = Math.abs(tint - shade) < .0005 ? shade : tint;
         drawHand(dt, motionAllowed);
@@ -913,9 +948,11 @@
       function readHand(session, points) {
         const now = performance.now();
         if (!points || points.length !== 21) {
-          if (now - session.lastSeen > 100) landmarks = null;
+          if (now - session.lastSeen > 100) {
+            landmarks = null;
+            session.lastOpenings = null;
+          }
           if (now - session.lastSeen > 280) status('请将一只手放入画面', 'active');
-          session.raw = 'idle';
           return;
         }
         landmarks = points;
@@ -925,24 +962,37 @@
         const p = points.map(({ x, y, z }) => vec(x, y * ratio, z));
         const palmX = 1 - (p[0].x + p[5].x + p[9].x + p[17].x) * .25;
         const palmY = (points[0].y + points[5].y + points[9].y + points[17].y) * .25;
-        handYaw = clamp((palmX - .5) * 2.55, -.93, .93);
-        handPitch = clamp((.53 - palmY) * 1.5 + .035, -.49, .49);
+        handYaw = clamp((.5 - palmX) * 2.55, -.93, .93);
+        handPitch = clamp((palmY - .53) * 1.5 + .035, -.49, .49);
         const palm = Math.max(.001, (p[0].distanceTo(p[9]) + p[5].distanceTo(p[17])) * .5);
+        const acrossPalm = p[5].clone().sub(p[17]).normalize();
+        const palmCenter = p[0].clone().lerp(p[9], .58);
+        const thumbSide = p[4].clone().sub(p[5]).dot(acrossPalm) / palm;
+        const thumbClearance = Math.min(p[4].distanceTo(p[5]), p[4].distanceTo(p[9]), p[4].distanceTo(palmCenter)) / palm;
+        const thumbAngle = p[2].clone().sub(p[3]).angleTo(p[4].clone().sub(p[3]));
+        const thumb = Math.max(
+          smootherstep(thumbSide, .015, .47),
+          smootherstep(thumbClearance, .32, .67) * lerp(.79, 1, smootherstep(thumbAngle, 1.47, 2.76)),
+        );
         const fingers = [5, 9, 13, 17].map((base) => {
           const joint = p[base + 1];
           const tip = p[base + 3];
-          const angle = p[base].clone().sub(joint).angleTo(tip.clone().sub(joint));
+          const angle = p[base].clone().sub(joint).angleTo(p[base + 2].clone().sub(joint));
           const reach = tip.distanceTo(p[0]) / Math.max(.001, joint.distanceTo(p[0]));
-          return { extended: angle > 2.46 && reach > 1.13, curled: angle < 2.04 || reach < 1.04 };
+          const extension = smootherstep(angle, 1.45, 2.77);
+          return extension * lerp(.36, 1, smootherstep(reach, 1.00, 1.18));
         });
-        const thumbOut = p[4].distanceTo(p[8]) / palm > .53 && p[4].distanceTo(p[5]) / palm > .45;
-        const pose = fingers.every((finger) => finger.curled) ? 'fist' : thumbOut && fingers.every((finger) => finger.extended) ? 'open' : 'neutral';
-        if (session.raw !== pose) {
-          session.raw = pose;
-          session.entered = now;
-        } else if (now - session.entered >= 29) {
-          if (pose === 'fist') setScattered(false);
-          if (pose === 'open') setScattered(true);
+        const previous = session.lastOpenings;
+        const openings = [thumb, ...fingers].map((value, i) => {
+          if (value < (previous?.[i] === 0 ? .055 : .028)) return 0;
+          if (value > (previous?.[i] === 1 ? .945 : .972)) return 1;
+          return value;
+        });
+        if (!previous || openings.some((value, i) => Math.abs(value - previous[i]) > .018 ||
+          ((value === 0 || value === 1) && value !== previous[i]))) {
+          session.lastOpenings = openings;
+          petalTargets.set(openings);
+          updateModeButtons();
         }
       }
 
@@ -958,7 +1008,7 @@
       cameraButton.addEventListener('click', () => {
         if (cameraSession) { stopCamera(); return; }
         if (!navigator.mediaDevices?.getUserMedia) { status('请用支持摄像头的浏览器打开此 HTTPS 页面', 'error'); return; }
-        const session = { raw: 'idle', entered: 0, lastSeen: 0, videoTime: -1, cleanupBeforeStart: cameraCleanup };
+        const session = { lastOpenings: null, lastSeen: 0, videoTime: -1, cleanupBeforeStart: cameraCleanup };
         cameraSession = session;
         status('正在启动摄像头…');
         cameraButton.setAttribute('aria-pressed', 'true');
